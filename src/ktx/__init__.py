@@ -8,15 +8,19 @@ import struct
 
 class Ktx(object):
     
-    def load_filename(self, file_name):
+    def read_filename(self, file_name):
         with io.open(file_name, 'rb') as fh:
-            self.load_stream(fh)
+            self.read_stream(fh)
     
-    def load_stream(self, file):
+    def read_stream(self, file):
         self.header = KtxHeader()
-        self.header.load_stream(file)
+        self.header.read_stream(file)
         self.image_data = KtxImageData()
-        self.image_data.load_stream(file, self.header)
+        self.image_data.read_stream(file, self.header)
+        
+    def write_stream(self, file):
+        self.header.write_stream(file)
+        self.image_data.write_stream(file)
         
 
 class KtxParseError(Exception):
@@ -25,7 +29,7 @@ class KtxParseError(Exception):
 
 class KtxHeader(object):
     
-    def load_stream(self, file):
+    def read_stream(self, file):
         # First load and check the binary file identifier for KTX files
         identifier = file.read(12)
         """
@@ -100,28 +104,67 @@ class KtxHeader(object):
         self.number_of_mipmap_levels = self._read_uint32(file)
         print (self.number_of_mipmap_levels)
         # key,value metadata
-        self.bytes_of_key_value_data = self._read_uint32(file)
-        print (self.bytes_of_key_value_data)
+        bytes_of_key_value_data = self._read_uint32(file)
+        print (bytes_of_key_value_data)
         self.key_value_metadata = dict()
-        remaining_key_value_bytes = self.bytes_of_key_value_data
+        self.keys = list()
+        remaining_key_value_bytes = bytes_of_key_value_data
         while remaining_key_value_bytes > 0:
             byte_size = self._read_uint32(file)
             key_and_value = file.read(byte_size)
-            file.read(3 - ((byte_size + 3) % 4)) # Value padding
+            padding = 3 - ((byte_size + 3) % 4)
+            file.read(padding) # Value padding
             remaining_key_value_bytes -= byte_size
+            remaining_key_value_bytes -= padding
             # Parse key and value
             key_end_idx = key_and_value.find('\x00')
             key = key_and_value[:key_end_idx]
             value = key_and_value[key_end_idx+1:]
             self.key_value_metadata[key] = value
+            self.keys.append(key)
+        
+    def write_stream(self, stream):
+        # Identifier
+        stream.write(b'\xabKTX 11\xbb\r\n\x1a\n')
+        if self.little_endian:
+            stream.write(b'\x01\x02\x03\x04')
+        else:
+            stream.write(b'\x04\x03\x02\x01')
+        self._write_uint32(stream, self.gl_type)
+        self._write_uint32(stream, self.gl_type_size)
+        self._write_uint32(stream, self.gl_format)
+        self._write_uint32(stream, self.gl_internal_format)
+        self._write_uint32(stream, self.gl_base_internal_format)
+        self._write_uint32(stream, self.pixel_width)
+        self._write_uint32(stream, self.pixel_height)
+        self._write_uint32(stream, self.pixel_depth)
+        self._write_uint32(stream, self.number_of_array_elements)
+        self._write_uint32(stream, self.number_of_faces)
+        self._write_uint32(stream, self.number_of_mipmap_levels)
+        # 
+        key_values = io.BytesIO()
+        for key in self.keys:
+            kv = io.BytesIO
+            kv.write(key)
+            kv.write('\x00')
+            kv.write(self.key_value_metadata[key])
+            size = len(kv.getvalue())
+            padding = 3 - ((size + 3) % 4)
+            key_values.write(kv.getvalue())
+            key_values.write(padding * '\x00')
+        self._write_uint32(stream, len(key_values.getvalue()))
+        stream.write(key_values.getvalue())
         
     def _read_uint32(self, stream):
         return struct.unpack(self.endian_char + b'I', stream.read(4))[0]
 
+    def _write_uint32(self, stream, val):
+        stream.write(struct.pack(self.endian_char + b'I', val))
+
     
 class KtxImageData(object):
     
-    def load_stream(self, file, header):
+    def read_stream(self, file, header):
         for mipmap_level in range(_not_zero(header.number_of_mipmap_levels)):
             for array_element in range(_not_zero(header.number_of_array_elements)):
                 for face in range(header.number_of_faces):
@@ -130,7 +173,10 @@ class KtxImageData(object):
                             for pixel in range(header.pixel_width):
                                 pass # TODO read bytes
                     # TODO cube padding
-            # TODO mipmap padding                    
+            # TODO mipmap padding
+            
+    def write_stream(self, file):
+        pass                 
 
 
 def _not_zero(val):
