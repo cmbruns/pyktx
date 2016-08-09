@@ -107,7 +107,7 @@ class KtxHeader(object):
         while remaining_key_value_bytes > 0:
             byte_size = self._read_uint32(file)
             key_and_value = file.read(byte_size)
-            value_padding = file.read(3 - ((byte_size + 3) % 4))
+            file.read(3 - ((byte_size + 3) % 4)) # Value padding
             remaining_key_value_bytes -= byte_size
             # Parse key and value
             key_end_idx = key_and_value.find('\x00')

@@ -4,7 +4,6 @@ Created on Aug 9, 2016
 @author: brunsc
 '''
 import unittest
-import io
 
 from ktx import Ktx
 
