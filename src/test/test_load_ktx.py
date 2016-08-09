@@ -14,7 +14,7 @@ class Test(unittest.TestCase):
     def testLoad1(self):
         img1 = Ktx()
         img1.read_filename("conftestimage_R11_EAC.ktx")
-        print("###")
+        # print("###")
         
     def testLoadAndSave(self):
         fname = "conftestimage_R11_EAC.ktx"
@@ -23,9 +23,11 @@ class Test(unittest.TestCase):
         out = BytesIO()
         ktx1.write_stream(out)
         out.seek(0)
-        print("####")
+        # print("####")
         Ktx().read_stream(out)
         original = io.open(fname, 'rb').read()
+        # print(len(out.getvalue()))
+        # print(len(original))
         assert out.getvalue() == original
         
 

@@ -20,7 +20,7 @@ class Ktx(object):
         
     def write_stream(self, file):
         self.header.write_stream(file)
-        self.image_data.write_stream(file)
+        self.image_data.write_stream(file, self.header)
         
 
 class KtxParseError(Exception):
@@ -82,30 +82,30 @@ class KtxHeader(object):
             raise KtxParseError('Unrecognized KTX endian specifier %s' % endian)
         # OpenGL texture metadata
         self.gl_type = self._read_uint32(file)
-        print (self.gl_type)
+        # print (self.gl_type)
         self.gl_type_size = self._read_uint32(file)
-        print (self.gl_type_size)
+        # print (self.gl_type_size)
         self.gl_format = self._read_uint32(file)
-        print (self.gl_format)
+        # print (self.gl_format)
         self.gl_internal_format = self._read_uint32(file)
-        print (self.gl_internal_format)
+        # print (self.gl_internal_format)
         self.gl_base_internal_format = self._read_uint32(file)
-        print (self.gl_base_internal_format)
+        # print (self.gl_base_internal_format)
         self.pixel_width = self._read_uint32(file)
-        print (self.pixel_width)
+        # print (self.pixel_width)
         self.pixel_height = self._read_uint32(file)
-        print (self.pixel_height)
+        # print (self.pixel_height)
         self.pixel_depth = self._read_uint32(file)
-        print (self.pixel_depth)
+        # print (self.pixel_depth)
         self.number_of_array_elements = self._read_uint32(file)
-        print (self.number_of_array_elements)
+        # print (self.number_of_array_elements)
         self.number_of_faces = self._read_uint32(file)
-        print (self.number_of_faces)
+        # print (self.number_of_faces)
         self.number_of_mipmap_levels = self._read_uint32(file)
-        print (self.number_of_mipmap_levels)
+        # print (self.number_of_mipmap_levels)
         # key,value metadata
         bytes_of_key_value_data = self._read_uint32(file)
-        print (bytes_of_key_value_data)
+        # print (bytes_of_key_value_data)
         self.key_value_metadata = dict()
         self.keys = list()
         remaining_key_value_bytes = bytes_of_key_value_data
@@ -150,9 +150,10 @@ class KtxHeader(object):
             kv.write(self.key_value_metadata[key])
             size = len(kv.getvalue())
             padding = 3 - ((size + 3) % 4)
-            key_values.write(kv.getvalue())
-            key_values.write(padding * '\x00')
-        self._write_uint32(stream, len(key_values.getvalue()))
+            key_values.write(size) # keyAndValueByteSize
+            key_values.write(kv.getvalue()) # keyAndValue
+            key_values.write(padding * '\x00') # valuePadding
+        self._write_uint32(stream, len(key_values.getvalue())) # bytesOfKeyValueData
         stream.write(key_values.getvalue())
         
     def _read_uint32(self, stream):
@@ -164,20 +165,31 @@ class KtxHeader(object):
     
 class KtxImageData(object):
     
+    def __init__(self):
+        self.mipmaps = list()
+    
     def read_stream(self, file, header):
         for mipmap_level in range(_not_zero(header.number_of_mipmap_levels)):
-            for array_element in range(_not_zero(header.number_of_array_elements)):
-                for face in range(header.number_of_faces):
-                    for z_slice in range(_not_zero(header.pixel_depth)):
-                        for row in range(_not_zero(header.pixel_height)):
-                            for pixel in range(header.pixel_width):
-                                pass # TODO read bytes
-                    # TODO cube padding
-            # TODO mipmap padding
+            image_size = header._read_uint32(file)
+            # print('Image size = %d' % image_size)
+            if header.number_of_faces == 6 and header.number_of_array_elements == 0:
+                pass # TODO - non-array cubemap case
+            else:
+                self.mipmaps.append(file.read(image_size))
+            mip_padding_size = 3 - ((image_size + 3) % 4)
+            file.read(mip_padding_size)
             
-    def write_stream(self, file):
-        pass                 
-
+    def write_stream(self, file, header):
+        for mipmap in self.mipmaps:
+            if header.number_of_faces == 6 and header.number_of_array_elements == 0:
+                pass # TODO - non-array cubemap case
+            else: # typical non-cubemap case
+                image_size = len(mipmap)
+                header._write_uint32(file, image_size)
+                file.write(mipmap)
+                mip_padding_size = 3 - ((image_size + 3) % 4)
+                file.write(mip_padding_size * b'\x00')
+            
 
 def _not_zero(val):
     if val == 0:
