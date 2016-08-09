@@ -104,22 +104,27 @@ class KtxHeader(object):
         self.number_of_mipmap_levels = self._read_uint32(file)
         # print (self.number_of_mipmap_levels)
         # key,value metadata
-        bytes_of_key_value_data = self._read_uint32(file)
+        bytes_of_key_value_data = self._read_uint32(file) # bytesOfKeyValueData
         # print (bytes_of_key_value_data)
         self.key_value_metadata = dict()
         self.keys = list()
         remaining_key_value_bytes = bytes_of_key_value_data
-        while remaining_key_value_bytes > 0:
-            byte_size = self._read_uint32(file)
+        # print (bytes_of_key_value_data)
+        while remaining_key_value_bytes > 4:
+            byte_size = self._read_uint32(file) # keyAndValueByteSize
+            # print (byte_size)
             key_and_value = file.read(byte_size)
             padding = 3 - ((byte_size + 3) % 4)
             file.read(padding) # Value padding
+            # print (padding)
             remaining_key_value_bytes -= byte_size
             remaining_key_value_bytes -= padding
             # Parse key and value
-            key_end_idx = key_and_value.find('\x00')
+            key_end_idx = key_and_value.find(b'\x00')
             key = key_and_value[:key_end_idx]
+            # print ("key = %s" % key)
             value = key_and_value[key_end_idx+1:]
+            # print ("value = %s" % value)
             self.key_value_metadata[key] = value
             self.keys.append(key)
         
@@ -144,15 +149,15 @@ class KtxHeader(object):
         # 
         key_values = io.BytesIO()
         for key in self.keys:
-            kv = io.BytesIO
+            kv = io.BytesIO()
             kv.write(key)
-            kv.write('\x00')
+            kv.write(b'\x00')
             kv.write(self.key_value_metadata[key])
             size = len(kv.getvalue())
             padding = 3 - ((size + 3) % 4)
-            key_values.write(size) # keyAndValueByteSize
+            self._write_uint32(key_values, size) # keyAndValueByteSize
             key_values.write(kv.getvalue()) # keyAndValue
-            key_values.write(padding * '\x00') # valuePadding
+            key_values.write(padding * b'\x00') # valuePadding
         self._write_uint32(stream, len(key_values.getvalue())) # bytesOfKeyValueData
         stream.write(key_values.getvalue())
         
