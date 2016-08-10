@@ -4,18 +4,21 @@ https://www.khronos.org/opengles/sdk/tools/KTX/file_format_spec/
 
 import io
 import struct
+import collections
 
 
 class Ktx(object):
+    
+    def __init__(self):
+        self.header = KtxHeader()
+        self.image_data = KtxImageData()
     
     def read_filename(self, file_name):
         with io.open(file_name, 'rb') as fh:
             self.read_stream(fh)
     
     def read_stream(self, file):
-        self.header = KtxHeader()
         self.header.read_stream(file)
-        self.image_data = KtxImageData()
         self.image_data.read_stream(file, self.header)
         
     def write_stream(self, file):
@@ -28,6 +31,9 @@ class KtxParseError(Exception):
 
 
 class KtxHeader(object):
+    
+    def __init__(self):
+        self.key_value_metadata = collections.OrderedDict()
     
     def read_stream(self, file):
         # First load and check the binary file identifier for KTX files
@@ -74,10 +80,8 @@ class KtxHeader(object):
         """
         if endian == b'\x01\x02\x03\x04':
             self.little_endian = True
-            self.endian_char = b'<'
         elif endian == b'\x04\x03\x02\x01':
             self.little_endian = False
-            self.endian_char = b'>'
         else:
             raise KtxParseError('Unrecognized KTX endian specifier %s' % endian)
         # OpenGL texture metadata
@@ -106,10 +110,9 @@ class KtxHeader(object):
         # key,value metadata
         bytes_of_key_value_data = self._read_uint32(file) # bytesOfKeyValueData
         # print (bytes_of_key_value_data)
-        self.key_value_metadata = dict()
-        self.keys = list()
         remaining_key_value_bytes = bytes_of_key_value_data
         # print (bytes_of_key_value_data)
+        self.key_value_metadata.clear()
         while remaining_key_value_bytes > 4:
             byte_size = self._read_uint32(file) # keyAndValueByteSize
             # print (byte_size)
@@ -126,7 +129,6 @@ class KtxHeader(object):
             value = key_and_value[key_end_idx+1:]
             # print ("value = %s" % value)
             self.key_value_metadata[key] = value
-            self.keys.append(key)
         
     def write_stream(self, stream):
         # Identifier
@@ -148,11 +150,11 @@ class KtxHeader(object):
         self._write_uint32(stream, self.number_of_mipmap_levels)
         # 
         key_values = io.BytesIO()
-        for key in self.keys:
+        for key, value in self.key_value_metadata.items():
             kv = io.BytesIO()
             kv.write(key)
             kv.write(b'\x00')
-            kv.write(self.key_value_metadata[key])
+            kv.write(value)
             size = len(kv.getvalue())
             padding = 3 - ((size + 3) % 4)
             self._write_uint32(key_values, size) # keyAndValueByteSize
@@ -162,10 +164,15 @@ class KtxHeader(object):
         stream.write(key_values.getvalue())
         
     def _read_uint32(self, stream):
-        return struct.unpack(self.endian_char + b'I', stream.read(4))[0]
+        return struct.unpack(self._endian_char() + b'I', stream.read(4))[0]
 
     def _write_uint32(self, stream, val):
-        stream.write(struct.pack(self.endian_char + b'I', val))
+        stream.write(struct.pack(self._endian_char() + b'I', val))
+        
+    def _endian_char(self):
+        if self.little_endian:
+            return b'<'
+        return b'>'
 
     
 class KtxImageData(object):
@@ -174,11 +181,11 @@ class KtxImageData(object):
         self.mipmaps = list()
     
     def read_stream(self, file, header):
-        for mipmap_level in range(_not_zero(header.number_of_mipmap_levels)):
+        for _ in range(_not_zero(header.number_of_mipmap_levels)):
             image_size = header._read_uint32(file)
             # print('Image size = %d' % image_size)
             if header.number_of_faces == 6 and header.number_of_array_elements == 0:
-                pass # TODO - non-array cubemap case
+                raise # TODO - non-array cubemap case
             else:
                 self.mipmaps.append(file.read(image_size))
             mip_padding_size = 3 - ((image_size + 3) % 4)
@@ -187,7 +194,7 @@ class KtxImageData(object):
     def write_stream(self, file, header):
         for mipmap in self.mipmaps:
             if header.number_of_faces == 6 and header.number_of_array_elements == 0:
-                pass # TODO - non-array cubemap case
+                raise # TODO - non-array cubemap case
             else: # typical non-cubemap case
                 image_size = len(mipmap)
                 header._write_uint32(file, image_size)
