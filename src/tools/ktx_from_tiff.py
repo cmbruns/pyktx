@@ -9,7 +9,8 @@ from ktx import Ktx
 from OpenGL import GL
 import io
 import lz4
-import math
+import time
+from ktx.util import create_mipmaps, mipmap_dimension
 
 """
 TODO: For converting rendered octree blocks, include the following precomputed:
@@ -57,10 +58,6 @@ def test_mipmap_dimension():
     assert mipmap_dimension(level=1, full=3) == 1
     assert mipmap_dimension(level=2, full=3) == 1
     
-
-def mipmap_dimension(level, full):
-    # Computes integer edge dimension for a mipmap of a particular level, based on the full sized (level zero) dimension
-    return int(max(1, math.floor(full / 2**level)))
 
 def test_downsample_xy():
     a1 = numpy.array( ( ((1,2,),(3,4,)),
@@ -110,6 +107,19 @@ def test_interleave_channel_arrays():
          [ 4,  9],
          [ 5, 10]]))
 
+def test_create_mipmaps():
+    fname = "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif"
+    with TiffFile(fname) as tif:
+        data = tif.asarray()
+    t0 = time.time()
+    mipmaps = create_mipmaps(data, filter_='arthur')
+    t1 = time.time()
+    print (t1-t0, " seconds elapsed time to compute mipmaps")
+    for i in range(len(mipmaps)):
+        tifffile.imsave("test_mipmap%02d.tif" % i, mipmaps[i])
+    t2 = time.time()
+    print (t2-t1, " seconds elapsed time to save mipmaps in tiff format to disk")
+
 def test_create_tiff():
     # https://pypi.python.org/pypi/tifffile
     fname = "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif"
@@ -123,16 +133,16 @@ def test_create_tiff():
     # TODO unmixing test
     # compute channel 1/2 unmixing parameters
     # For lower end of mapping, just use lower quartile intensity (non-zero!)
-    lower1 = numpy.percentile(data1[data1 != 0], 25)
-    lower2 = numpy.percentile(data2[data2 != 0], 25)
+    lower1 = numpy.percentile(data1[data1 != 0], 40)
+    lower2 = numpy.percentile(data2[data2 != 0], 40)
     print (lower1, lower2)
     # For upper end of mapping, use voxels that are bright in BOTH channels
     m_a = numpy.median(data1[data1 != 0])
     m_b = numpy.median(data2[data2 != 0])
     s_a = numpy.std(data1[data1 != 0])
     s_b = numpy.std(data2[data2 != 0])
-    upper1 = numpy.median(data1[(data1 > m_a + 4*s_a) & (data2 > m_b + 3*s_b)])
-    upper2 = numpy.median(data2[(data1 > m_a + 4*s_a) & (data2 > m_b + 3*s_b)])
+    upper1 = numpy.median(data1[(data1 > m_a + 2*s_a) & (data2 > m_b + 2*s_b)])
+    upper2 = numpy.median(data2[(data1 > m_a + 2*s_a) & (data2 > m_b + 2*s_b)])
     print (upper1, upper2)
     # transform data2 to match data1
     scale = (upper1 - lower1) / (upper2 - lower2)
@@ -147,7 +157,7 @@ def test_create_tiff():
     data2b = numpy.array(data2b, dtype=data1.dtype)
     # TODO ktx to tiff
     # Needs 1 or 3 channels for Fiji to load it OK
-    data3 = numpy.zeros_like(data1)
+    # data3 = numpy.zeros_like(data1)
     tissue = numpy.minimum(data1, data2)
     tissue_base = numpy.percentile(tissue[tissue != 0], 4) - 1
     tissue = numpy.array(tissue, dtype='float32') # so we can handle negative numbers
@@ -175,9 +185,31 @@ def test_create_tiff():
     unmixed2 = numpy.array(unmixed2, dtype=data1.dtype)
     #
     print (tissue.shape)
-    data123 = interleave_channel_arrays( (data2b, data1, data3) )
+    data123 = interleave_channel_arrays( (data2, data1b, unmixed2) )
     # print (data123.shape)
     tifffile.imsave('test123.tif', data123)
+
+def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='arthur', downsample_xy=False, downsample_intensity=False):
+    """
+    Load multiple single-channel tiff files, and create a multichannel Ktx object.
+    Mipmap voxel filtering options:
+      None - no mipmaps will be generated
+      'mean' - average of parent voxels
+      'max' - maximum of parent voxels
+      'arthur' - second largest intensity among parent voxels (good for 
+          preserving sparse, bright features, without too much noise)
+    """
+    tiff_arrays = list()
+    for fname in channel_tiff_names:
+        with TiffFile(fname) as tif:
+            arr = tif.asarray()
+            if mipmap_filter is not None:
+                tiff_arrays.append(create_mipmaps(arr, filter_=mipmap_filter))
+            else:
+                tiff_arrays.append((arr,),)
+    
+    ktx = Ktx()
+    
 
 def main():
     test_mipmap_dimension()
@@ -267,4 +299,4 @@ def main():
         ktx_out.write(lz4.dumps(temp.getvalue()))
     
 if __name__ == "__main__":
-    test_create_tiff()
+    test_create_mipmaps()
