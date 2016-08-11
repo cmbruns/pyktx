@@ -10,6 +10,10 @@ from OpenGL import GL
 import io
 import lz4
 import time
+from glob import glob
+import os
+import math
+
 from ktx.util import create_mipmaps, mipmap_dimension, interleave_channel_arrays
 
 """
@@ -250,6 +254,59 @@ def test_create_tiff():
     # print (data123.shape)
     tifffile.imsave('test123.tif', data123)
 
+def ktx_from_mouselight_octree_folder(input_folder_name,
+                              output_folder_name,
+                              num_levels=1, # '0' means 'all'
+                              mipmap_filter='max', 
+                              downsample_xy=True, 
+                              downsample_intensity=False):
+    # Parse geometry data from top level transform.txt
+    metadata = dict()
+    with io.open(os.path.join(input_folder_name, "transform.txt"), 'r') as transform_file:
+        for line in transform_file:
+            fields = line.split(": ")
+            if len(fields) != 2:
+                continue
+            metadata[fields[0].strip()] = fields[1].strip()
+    for k, v in metadata.items():
+        print (k, v)
+    if num_levels == 0:
+        num_levels = int(metadata["nl"])
+    assert num_levels > 0
+    folder = input_folder_name
+    for level in range(num_levels):
+        tiffs = glob(os.path.join(folder, "default.*.tif"))
+        ktx = ktx_from_tiff_channel_files(tiffs, mipmap_filter, downsample_xy, downsample_intensity)
+        # Additional metadata, from personal knowledge
+        kv = ktx.header.key_value_metadata
+        kv[b'distance_units'] = b'micrometers'
+        umFromNm = 1.0/1000.0
+        ox = umFromNm*float(metadata['ox'])
+        oy = umFromNm*float(metadata['oy'])
+        oz = umFromNm*float(metadata['oz'])
+        # TODO: account for downsampling...
+        sx = umFromNm*ktx.header.pixel_width*float(metadata['sx']) 
+        sy = umFromNm*ktx.header.pixel_height*float(metadata['sy'])
+        sz = umFromNm*ktx.header.pixel_depth*float(metadata['sz'])
+        xform = numpy.array([ # TODO: use correct values in matrix...
+                [sx, 0, 0, ox],
+                [0, sy, 0, oy],
+                [0, 0, sz, oz],
+                [0, 0, 0, 1],], dtype='float32')
+        print(xform)
+        kv[b'xyz_from_texcoord_xform'] = xform.tostring()
+        #
+        center = numpy.array(ox + 0.5*sx, oy + 0.5*sy, oz + 0.5*sz)
+        radius = math.sqrt(sx*sx + sy*sy + sz*sz)/16.0
+        kv[b'bounding_sphere_center'] = center.tostring()
+        kv[b'bounding_sphere_radius'] = str(radius)
+        # Write LZ4-compressed file
+        with io.open('test.ktx.lz4', 'wb') as ktx_out:
+            temp = io.BytesIO()
+            ktx.write_stream(temp)
+            compressed = lz4.dumps(temp.getvalue())
+            ktx_out.write(compressed)
+
 def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsample_xy=True, downsample_intensity=False):
     """
     Load multiple single-channel tiff files, and create a multichannel Ktx object.
@@ -272,25 +329,7 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
         channels.append(numpy.zeros_like(channels[0]))
     combined = interleave_channel_arrays(channels)
     ktx = Ktx.from_ndarray(combined, mipmap_filter=mipmap_filter)
-    # Additional metadata, from personal knowledge
-    kv = ktx.header.key_value_metadata
-    kv[b'distance_units'] = b'micrometers\x00'
-    xform = numpy.array([ # TODO: use correct values in matrix...
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1],], dtype='float32')
-    kv[b'xyz_from_texcoord_xform'] = xform.tostring()
-    # Write LZ4-compressed file
-    with io.open('test.ktx.lz4', 'wb') as ktx_out:
-        temp = io.BytesIO()
-        ktx.write_stream(temp)
-        compressed = lz4.dumps(temp.getvalue())
-        ktx_out.write(compressed)
-    # ktx.populate_from_ndarray(combined) 
-    # TODO: remove tiff writing after debugging
-    # Testing
-    tifffile.imsave('combined.tif', combined)
+    return ktx
 
 def main():
     test_mipmap_dimension()
@@ -380,7 +419,12 @@ def main():
         ktx_out.write(lz4.dumps(temp.getvalue()))
     
 if __name__ == "__main__":
+    """
     ktx_from_tiff_channel_files(
             ("E:/brunsc/projects/ktxtiff/octree_tip/default.1.tif",
             "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif",
             ), )
+    """
+    ktx_from_mouselight_octree_folder(
+            input_folder_name='//fxt/nobackup2/mouselight/2015-06-19-johan-full', 
+            output_folder_name='')

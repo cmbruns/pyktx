@@ -128,11 +128,11 @@ def interleave_channel_arrays(arrays):
     "Combine multiple single channel stacks into one multi-channel stack"
     a = arrays[0]
     shp = list(a.shape)
-    print (shp)
-    print (len(shp))
+    # print (shp)
+    # print (len(shp))
     shp.append(len(arrays))
-    print(shp)
-    print (a.dtype)
+    # print(shp)
+    # print (a.dtype)
     c = numpy.empty( shape=shp, dtype=a.dtype)
     for i in range(len(arrays)):
         assert arrays[i].shape == a.shape
