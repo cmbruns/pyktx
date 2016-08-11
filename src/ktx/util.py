@@ -90,7 +90,7 @@ def create_mipmaps(mipmap0, filter_='mean'):
         # Generate mipmap
         # Combine those subvoxels into the final mipmap
         # Avoid zeros in mean/arthur computation
-        useNan = False
+        useNan = False # True is SOOO SLOWWWW
         if useNan:
             scratch = scratch.astype('float32') # 'float64' causes MemoryError?
             # Zero means no data, so set to "NaN" for filtering
@@ -122,3 +122,22 @@ def create_mipmaps(mipmap0, filter_='mean'):
         mipmaps.append(mipmap)
     return mipmaps
 
+def interleave_channel_arrays(arrays):
+    "Combine multiple single channel stacks into one multi-channel stack"
+    a = arrays[0]
+    shp = list(a.shape)
+    print (shp)
+    print (len(shp))
+    shp.append(len(arrays))
+    print(shp)
+    print (a.dtype)
+    c = numpy.empty( shape=shp, dtype=a.dtype)
+    for i in range(len(arrays)):
+        assert arrays[i].shape == a.shape
+        if len(shp) == 4:
+            c[:,:,:,i] = arrays[i]
+        elif len(shp) == 2:
+            c[:,i] = arrays[i]
+        else:
+            raise         
+    return c

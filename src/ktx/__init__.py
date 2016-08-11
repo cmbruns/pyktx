@@ -2,16 +2,112 @@
 https://www.khronos.org/opengles/sdk/tools/KTX/file_format_spec/
 """
 
+import collections
 import io
 import struct
-import collections
+import sys
 
+from OpenGL import GL
+from ktx.util import create_mipmaps, interleave_channel_arrays
 
 class Ktx(object):
     
     def __init__(self):
         self.header = KtxHeader()
         self.image_data = KtxImageData()
+    
+    @staticmethod
+    def from_ndarray(array, multichannel=None, mipmap_filter='arthur'):
+        """
+        Creates a Ktx object from an array like that returned by tifffile.TiffFile.asarray()
+        """
+        # Does this array have multiple color channels?
+        if multichannel is None:
+            # Guess, in case multichannel is not specified
+            multichannel = len(array.shape) > 1 and array.shape[-1] < 5
+        if multichannel:
+            # yes, multichannel
+            spatial_shape = array.shape[0:-1]
+            channel_count = array.shape[-1]
+        else:
+            spatial_shape = array.shape
+            channel_count = 1
+        # print (spatial_shape, channel_count)
+        ktx = Ktx() 
+        dt = array.dtype
+        kh = ktx.header
+        if dt.byteorder == '<':
+            kh.little_endian = True
+        elif dt.byteorder == '=':
+            kh.little_endian = sys.byteorder == 'little'
+        else:
+            raise # TODO
+        print (dt.byteorder)
+        print (kh.little_endian)
+        if dt.kind == 'u':
+            if dt.itemsize == 2:
+                kh.gl_type = GL.GL_UNSIGNED_SHORT
+            elif dt.itemsize == 1:
+                kh.gl_type = GL.GL_UNSIGNED_BYTE
+            else:
+                raise # TODO:
+        else:
+            raise # TODO:
+        kh.gl_type_size = dt.itemsize
+        #
+        if channel_count == 1:
+            kh.gl_format = kh.gl_base_internal_format = GL.GL_RED
+        elif channel_count == 2:
+            kh.gl_format = kh.gl_base_internal_format = GL.GL_RG
+        elif channel_count == 3:
+            kh.gl_format = kh.gl_base_internal_format = GL.GL_RGB
+        elif channel_count == 4:
+            kh.gl_format = kh.gl_base_internal_format = GL.GL_RGBA
+        else:
+            raise # TODO
+        #
+        # TODO: - lots of cases need to be enumerate here...
+        if kh.gl_base_internal_format == GL.GL_RG:
+            if kh.gl_type == GL.GL_UNSIGNED_SHORT:
+                kh.gl_internal_format = GL.GL_RG16UI
+            else:
+                raise
+        elif kh.gl_base_internal_format == GL.GL_RGB:
+            if kh.gl_type == GL.GL_UNSIGNED_SHORT:
+                kh.gl_internal_format = GL.GL_RGB16UI
+            else:
+                raise
+        else:
+            raise # TODO
+        #
+        kh.pixel_width = spatial_shape[2]
+        kh.pixel_height = spatial_shape[1]
+        kh.pixel_depth = spatial_shape[0]
+        kh.number_of_array_elements = 0
+        kh.number_of_faces = 0
+        
+        # 
+        ktx.image_data.mipmaps.clear()
+        if mipmap_filter is not None:
+            channel_mipmaps = list()
+            for c in range(channel_count):
+                # Prepare to split exactly one channel from array
+                channel_key = [slice(None),] * len(spatial_shape)
+                if multichannel:
+                    channel_key.append(c)
+                channel = array[channel_key]
+                mipmaps = create_mipmaps(channel, filter_=mipmap_filter)
+                channel_mipmaps.append(mipmaps)
+            # Recombine channels, one mipmap at a time
+            kh.number_of_mipmap_levels = len(channel_mipmaps[0])
+            for m in range(kh.number_of_mipmap_levels):
+                channels = [a[m] for a in channel_mipmaps]
+                combined = interleave_channel_arrays(channels)
+                ktx.image_data.mipmaps.append(combined.tostring())
+        else:
+            kh.number_of_mipmap_levels = 1
+            ktx.image_data.mipmaps.append(array.tostring())
+        return ktx
     
     def read_filename(self, file_name):
         with io.open(file_name, 'rb') as fh:

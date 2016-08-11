@@ -10,7 +10,7 @@ from OpenGL import GL
 import io
 import lz4
 import time
-from ktx.util import create_mipmaps, mipmap_dimension
+from ktx.util import create_mipmaps, mipmap_dimension, interleave_channel_arrays
 
 """
 TODO: For converting rendered octree blocks, include the following precomputed:
@@ -36,7 +36,7 @@ TODO: For converting rendered octree blocks, include the following precomputed:
       * creation time
       * name of program used to create this block
       * version of program used to create this block
-      * texture coordinate bounds for display (there might be padding...)
+      * texture coordinate bounds for display (because there might be padding...)
 """
 
 def test_mipmap_dimension():
@@ -59,39 +59,99 @@ def test_mipmap_dimension():
     assert mipmap_dimension(level=2, full=3) == 1
     
 
-def test_downsample_xy():
-    a1 = numpy.array( ( ((1,2,),(3,4,)),
-                        ((5,6,),(7,8,)) ), 
-                     dtype='uint16' )
-    print (a1)
-    print (a1.shape)
-    print (numpy.percentile(a1, 99, interpolation='lower')) # Arthur filtering
-    # TODO - reshape so clusters of 4 are in their own dimension
-    # TODO - test with NaNs/zeros
+def test_downsample_xy(filter_='arthur'):
+    fname = "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif"
+    with TiffFile(fname) as tif:
+        data = tif.asarray()
+    t0 = time.time()
+    downsampled = downsample_array_xy(data, filter_=filter_)
+    t1 = time.time()
+    print (t1-t0, " seconds elapsed time to downsample volume in XY")
+    tifffile.imsave("downsampled.tif", downsampled)
+    t2 = time.time()
+    print (t2-t1, " seconds elapsed time to save downsampled volume in tiff format to disk")
 
-def downsample_xy(arr):
-    "downsample in X and Y directions, using second largest non-zero intensity"
-    # TODO
-
-def interleave_channel_arrays(arrays):
-    "Combine multiple single channel stacks into one multi-channel stack"
-    a = arrays[0]
-    shp = list(a.shape)
-    print (shp)
-    print (len(shp))
-    shp.append(len(arrays))
-    print(shp)
-    print (a.dtype)
-    c = numpy.empty( shape=shp, dtype=a.dtype)
-    for i in range(len(arrays)):
-        assert arrays[i].shape == a.shape
-        if len(shp) == 4:
-            c[:,:,:,i] = arrays[i]
-        elif len(shp) == 2:
-            c[:,i] = arrays[i]
+def downsample_array_xy(array, filter_='arthur'):
+    """
+    Downsample in X and Y directions, using second largest non-zero intensity.
+    TODO: reduce duplicated code compared to create_mipmaps
+    """
+    # Initialize first dimension, Z, with no downsampling
+    shape = list( (array.shape[0],) )
+    axis_offsets = list() # Enumerates samples to combine in each direction
+    axis_offsets.append( (0,), )
+    axis_step = list( (1,) )
+    # Downsample X and Y dimensions
+    for i in range(1,3):
+        d = mipmap_dimension(1, array.shape[i])
+        shape.append(d)
+        factor = array.shape[i] / d
+        if factor > 2.0:
+            axis_offsets.append((0, 1, 2,),) # combine three samples along odd-dimensioned axes
+            axis_step.append(2)
+        elif factor == 2.0:
+            axis_offsets.append((0, 1,),) # combine two samples along even-dimensioned axes
+            axis_step.append(2)
+        elif factor == 1.0:
+            axis_offsets.append((0,),) # single sample along one-length dimensions
+            axis_step.append(1)
         else:
-            raise         
-    return c
+            assert False # should not happen
+    shape = tuple(shape)
+    reduction_factor = 1
+    for offset in axis_offsets:
+        reduction_factor *= len(offset)
+    scratch_shape = list(shape)
+    scratch_shape.append(reduction_factor) # extra final dimension to hold subvoxel samples
+    scratch = numpy.empty(shape=scratch_shape, dtype=array.dtype)
+    sy = len(axis_offsets[1])
+    sx = len(axis_offsets[2])
+    ndims = 3 # TODO: don't hardcode this...
+    for z in axis_offsets[0]:
+        for y in axis_offsets[1]:
+            for x in axis_offsets[2]:
+                axis_start = (z, y, x)
+                # Generate slice to extract this subvoxel from the parent mipmap
+                parent_key = list()
+                for i in range(ndims):
+                    start = axis_start[i] # Initial offset along axis
+                    end = axis_start[i] + scratch_shape[i] * axis_step[i] # Final offset along axis, +1
+                    step = axis_step[i] # Stride along axis
+                    slice_ = slice(start, end, step) # partial key for our fancy data slurp, below
+                    parent_key.append(slice_)
+                subvoxel_index = x + y*sx + z*sx*sy
+                scratch_key = [slice(None), ] * ndims + [subvoxel_index,] # e.g. [:,:,:,0]
+                # Slurp every instance of this subvoxel into the scratch array
+                scratch[scratch_key] = array[parent_key]
+    # Generate mipmap
+    # Combine those subvoxels into the final mipmap
+    # Avoid zeros in mean/arthur computation
+    useNan = False
+    if useNan:
+        scratch = scratch.astype('float32') # 'float64' causes MemoryError?
+        # Zero means no data, so set to "NaN" for filtering
+        scratch[scratch==0] = numpy.nan
+    if filter_ == 'mean':
+        if useNan:
+            downsampled = numpy.nanmean(scratch, axis=ndims) # Permit calculation to default to float dtype
+        else:
+            downsampled = numpy.mean(scratch, axis=ndims) # Permit calculation to default to float dtype                
+    elif filter_ == 'max':
+        if useNan:
+            downsampled = numpy.nanmax(scratch, axis=ndims)
+        else:
+            downsampled = numpy.nan(scratch, axis=ndims)                
+    elif filter_ == 'arthur': # second largest pixel value
+        # percentile "82" yields second-largest value when number of elements is 7-12 (8 is canonical)
+        if useNan:
+            downsampled = numpy.nanpercentile(scratch, 82, axis=ndims, interpolation='higher')
+        else:
+            downsampled = numpy.percentile(scratch, 82, axis=ndims, interpolation='higher')
+    else:
+        assert False # TODO: unknown filter
+    downsampled = numpy.nan_to_num(downsampled) # Convert NaN to zero before writing
+    downsampled = downsampled.astype(array.dtype) # Convert back to integer dtype AFTER calculation
+    return downsampled
 
 def test_interleave_channel_arrays():
     a = numpy.array( (1,2,3,4,5,), dtype='uint16' )
@@ -111,6 +171,7 @@ def test_create_mipmaps():
     fname = "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif"
     with TiffFile(fname) as tif:
         data = tif.asarray()
+    data = downsample_array_xy(data, filter_='arthur')
     t0 = time.time()
     mipmaps = create_mipmaps(data, filter_='arthur')
     t1 = time.time()
@@ -189,7 +250,7 @@ def test_create_tiff():
     # print (data123.shape)
     tifffile.imsave('test123.tif', data123)
 
-def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='arthur', downsample_xy=False, downsample_intensity=False):
+def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='arthur', downsample_xy=True, downsample_intensity=False):
     """
     Load multiple single-channel tiff files, and create a multichannel Ktx object.
     Mipmap voxel filtering options:
@@ -199,17 +260,27 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='arthur', down
       'arthur' - second largest intensity among parent voxels (good for 
           preserving sparse, bright features, without too much noise)
     """
-    tiff_arrays = list()
+    channels = list()
     for fname in channel_tiff_names:
         with TiffFile(fname) as tif:
             arr = tif.asarray()
-            if mipmap_filter is not None:
-                tiff_arrays.append(create_mipmaps(arr, filter_=mipmap_filter))
-            else:
-                tiff_arrays.append((arr,),)
-    
-    ktx = Ktx()
-    
+            if downsample_xy:
+                arr = downsample_array_xy(arr, mipmap_filter)
+            channels.append(arr)
+    # TODO: remove this kludge to get a decent TIFF when there are only 2 channels
+    if len(channels) == 2:
+        channels.append(numpy.zeros_like(channels[0]))
+    combined = interleave_channel_arrays(channels)
+    ktx = Ktx.from_ndarray(combined)
+    with io.open('test.ktx.lz4', 'wb') as ktx_out:
+        temp = io.BytesIO()
+        ktx.write_stream(temp)
+        compressed = lz4.dumps(temp.getvalue())
+        ktx_out.write(compressed)
+    # ktx.populate_from_ndarray(combined) 
+    # TODO: remove tiff writing after debugging
+    # Testing
+    tifffile.imsave('combined.tif', combined)
 
 def main():
     test_mipmap_dimension()
@@ -299,4 +370,7 @@ def main():
         ktx_out.write(lz4.dumps(temp.getvalue()))
     
 if __name__ == "__main__":
-    test_create_mipmaps()
+    ktx_from_tiff_channel_files(
+            ("E:/brunsc/projects/ktxtiff/octree_tip/default.1.tif",
+            "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif",
+            ), )
