@@ -14,7 +14,7 @@ def mipmap_dimension(level, full):
     # Computes integer edge dimension for a mipmap of a particular level, based on the full sized (level zero) dimension
     return int(max(1, math.floor(full / 2**level)))
 
-def create_mipmaps(mipmap0, filter_='mean'):
+def create_mipmaps(mipmap0, filter_='arthur'):
     """
     Creates a sequence of mipmaps for a single-channel numpy image data array,
     Mipmap sizes follow OpenGL convention. 
@@ -90,7 +90,7 @@ def create_mipmaps(mipmap0, filter_='mean'):
         # Generate mipmap
         # Combine those subvoxels into the final mipmap
         # Avoid zeros in mean/arthur computation
-        useNan = False # True is SOOO SLOWWWW
+        useNan = True # nanpercentile is SOOO SLOWWWW
         if useNan:
             scratch = scratch.astype('float32') # 'float64' causes MemoryError?
             # Zero means no data, so set to "NaN" for filtering
@@ -104,11 +104,13 @@ def create_mipmaps(mipmap0, filter_='mean'):
             if useNan:
                 mipmap = numpy.nanmax(scratch, axis=ndims)
             else:
-                mipmap = numpy.nan(scratch, axis=ndims)                
+                mipmap = numpy.amax(scratch, axis=ndims)                
         elif filter_ == 'arthur': # second largest pixel value
             # percentile "82" yields second-largest value when number of elements is 7-12 (8 is canonical)
             if useNan:
-                mipmap = numpy.nanpercentile(scratch, 82, axis=ndims, interpolation='higher')
+                mipmap = numpy.percentile(scratch, 82, axis=ndims, interpolation='higher')
+                # Forget it; nanpercentile is crazy slow
+                # mipmap = numpy.nanpercentile(scratch, 82, axis=ndims, interpolation='higher')
             else:
                 mipmap = numpy.percentile(scratch, 82, axis=ndims, interpolation='higher')
         else:

@@ -140,7 +140,7 @@ def downsample_array_xy(array, filter_='arthur'):
         if useNan:
             downsampled = numpy.nanmax(scratch, axis=ndims)
         else:
-            downsampled = numpy.nan(scratch, axis=ndims)                
+            downsampled = numpy.amax(scratch, axis=ndims)                
     elif filter_ == 'arthur': # second largest pixel value
         # percentile "82" yields second-largest value when number of elements is 7-12 (8 is canonical)
         if useNan:
@@ -167,13 +167,13 @@ def test_interleave_channel_arrays():
          [ 4,  9],
          [ 5, 10]]))
 
-def test_create_mipmaps():
+def test_create_mipmaps(filter_='arthur'):
     fname = "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif"
     with TiffFile(fname) as tif:
         data = tif.asarray()
-    data = downsample_array_xy(data, filter_='arthur')
+    data = downsample_array_xy(data, filter_=filter_)
     t0 = time.time()
-    mipmaps = create_mipmaps(data, filter_='arthur')
+    mipmaps = create_mipmaps(data, filter_=filter_)
     t1 = time.time()
     print (t1-t0, " seconds elapsed time to compute mipmaps")
     for i in range(len(mipmaps)):
@@ -250,7 +250,7 @@ def test_create_tiff():
     # print (data123.shape)
     tifffile.imsave('test123.tif', data123)
 
-def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='arthur', downsample_xy=True, downsample_intensity=False):
+def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsample_xy=True, downsample_intensity=False):
     """
     Load multiple single-channel tiff files, and create a multichannel Ktx object.
     Mipmap voxel filtering options:
@@ -271,7 +271,17 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='arthur', down
     if len(channels) == 2:
         channels.append(numpy.zeros_like(channels[0]))
     combined = interleave_channel_arrays(channels)
-    ktx = Ktx.from_ndarray(combined)
+    ktx = Ktx.from_ndarray(combined, mipmap_filter=mipmap_filter)
+    # Additional metadata, from personal knowledge
+    kv = ktx.header.key_value_metadata
+    kv[b'distance_units'] = b'micrometers\x00'
+    xform = numpy.array([ # TODO: use correct values in matrix...
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],], dtype='float32')
+    kv[b'xyz_from_texcoord_xform'] = xform.tostring()
+    # Write LZ4-compressed file
     with io.open('test.ktx.lz4', 'wb') as ktx_out:
         temp = io.BytesIO()
         ktx.write_stream(temp)
