@@ -16,6 +16,7 @@ class Ktx(object):
         self.header = KtxHeader()
         self.image_data = KtxImageData()
     
+    
     @staticmethod
     def from_ndarray(array, multichannel=None, mipmap_filter='arthur'):
         """
