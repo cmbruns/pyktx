@@ -19,12 +19,11 @@ def _assort_subvoxels(input_array, shape):
     Rearrange pixels before downsampling a volume, so subvoxels to be combined are in a new fast-moving dimension
     """
     axis_offsets = list() # Enumerates samples to combine in each direction
-    axis_offsets.append( (0,), )
-    axis_step = list( (1,) )
+    axis_step = list()
     # Compute samples and stride for each dimension
     ndims = len(shape)
     for i in range(ndims):
-        d = shape(i)
+        d = shape[i]
         factor = input_array.shape[i] / d
         axis_offsets.append( tuple(range(int(math.ceil(factor)))) ) # e.g. (0,1)
         axis_step.append( int(math.floor(factor)) )
@@ -49,7 +48,7 @@ def _assort_subvoxels(input_array, shape):
             stride = pstrides[i] # distance between adjacent subvoxels in this dimension
             start = p_remainder // stride # index of subvoxel in this dimension
             axis_start.append(start)
-            p_remainder -= p_remainder % stride
+            p_remainder -= start * stride
         # Generate slice to extract this subvoxel from the parent mipmap
         parent_key = list()
         for i in range(ndims):
@@ -61,7 +60,10 @@ def _assort_subvoxels(input_array, shape):
         subvoxel_index = p
         scratch_key = [slice(None), ] * ndims + [subvoxel_index,] # e.g. [:,:,:,0]
         # Slurp every instance of this subvoxel into the scratch array
-        scratch[scratch_key] = input_array[parent_key]
+        try:
+            scratch[scratch_key] = input_array[parent_key]
+        except ValueError:
+            pass
     return scratch
 
 def downsample_array_xy(array, filter_='arthur'):
@@ -169,12 +171,15 @@ def create_mipmaps(mipmap0, filter_='arthur'):
     previous_mipmap = mipmap0
     while current_shape != smallest_shape:
         mipmap_level += 1
-        next_shape = list()
+        next_shape = tuple([mipmap_dimension(mipmap_level, biggest_shape[i]) for i in range(ndims)])
+        
+        """
+        # next_shape = list()
         axis_offsets = list() # Enumerates samples to combine in each direction
         axis_step = list()
         for i in range(ndims):
             d = mipmap_dimension(mipmap_level, biggest_shape[i])
-            next_shape.append(d)
+            # next_shape.append(d)
             factor = current_shape[i]/d
             if factor > 2.0:
                 axis_offsets.append((0, 1, 2,),) # combine three samples along odd-dimensioned axes
@@ -187,7 +192,7 @@ def create_mipmaps(mipmap0, filter_='arthur'):
                 axis_step.append(1)
             else:
                 assert False # should not happen
-        next_shape = tuple(next_shape)
+        # next_shape = tuple(next_shape)
         # print(next_shape)
         # How many voxels combine into one at this mipmap level?
         reduction_factor = 1
@@ -219,6 +224,10 @@ def create_mipmaps(mipmap0, filter_='arthur'):
                     scratch_key = [slice(None), ] * ndims + [subvoxel_index,] # e.g. [:,:,:,0]
                     # Slurp every instance of this subvoxel into the scratch array
                     scratch[scratch_key] = previous_mipmap[parent_key]
+        """
+                    
+        scratch = _assort_subvoxels(previous_mipmap, next_shape)
+        
         # Generate mipmap
         # Combine those subvoxels into the final mipmap
         # Avoid zeros in mean/arthur computation
