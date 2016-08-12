@@ -82,7 +82,8 @@ def _filter_assorted_array(assorted_array, filter_='mean'):
     """
     # Combine those subvoxels into the final mipmap
     # Avoid zeros in mean/arthur computation
-    ndims = len(assorted_array) - 1 # "1" Because it has an extra dimension for the subvoxels
+    original_dtype = assorted_array.dtype
+    ndims = len(assorted_array.shape) - 1 # "1" Because it has an extra dimension for the subvoxels
     useNan = True # nanpercentile is SOOO SLOWWWW
     if useNan and filter_ != 'arthur':
         assorted_array = assorted_array.astype('float32') # 'float64' causes MemoryError?
@@ -111,7 +112,7 @@ def _filter_assorted_array(assorted_array, filter_='mean'):
     else:
         raise Exception("Unknown downsampling filter %s" % filter_)
     mipmap = numpy.nan_to_num(mipmap) # Convert NaN to zero before writing
-    mipmap = mipmap.astype(assorted_array.dtype) # Convert back to integer dtype AFTER calculation
+    mipmap = mipmap.astype(original_dtype) # Convert back to integer dtype AFTER calculation
     return mipmap
 
 def downsample_array_xy(array, filter_='arthur'):

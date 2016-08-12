@@ -184,8 +184,8 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
             if len(fields) != 2:
                 continue
             metadata[fields[0].strip()] = fields[1].strip()
-    for k, v in metadata.items():
-        print (k, v)
+    # for k, v in metadata.items():
+    #     print (k, v)
     if num_levels == 0:
         num_levels = int(metadata["nl"])
     assert num_levels > 0
@@ -209,7 +209,7 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
                 [0, sy, 0, oy],
                 [0, 0, sz, oz],
                 [0, 0, 0, 1],], dtype='float32')
-        print(xform)
+        # print(xform)
         kv[b'xyz_from_texcoord_xform'] = xform.tobytes()
         #
         center = numpy.array( (ox + 0.5*sx, oy + 0.5*sy, oz + 0.5*sz,), )
@@ -265,7 +265,7 @@ def main():
                 # print (numpy.percentile(data[data != 0], [25, 99]))
     a = arrays[0]
     b = arrays[1]
-    # TODO: generate linear unmixing parameters appropritate for both dim and bright sections
+    # TODO: generate linear unmixing parameters appropriate for both dim and bright sections
     # Use only non-zero locations for basic statistics
     m_a = numpy.median(a[a != 0])
     s_a = numpy.std(a[a != 0])
