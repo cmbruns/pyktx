@@ -6,9 +6,10 @@ import collections
 import io
 import struct
 import sys
+import numpy
 
 from OpenGL import GL
-from ktx.util import create_mipmaps, interleave_channel_arrays
+from ktx.util import create_mipmaps, interleave_channel_arrays, mipmap_dimension
 
 class Ktx(object):
     
@@ -16,6 +17,36 @@ class Ktx(object):
         self.header = KtxHeader()
         self.image_data = KtxImageData()
     
+    def asarray(self, mipmap_level=0):
+        # Extract image shape
+        h = self.header
+        full_shape = list()
+        if h.pixel_depth > 1:
+            full_shape.append(h.pixel_depth)
+        if h.pixel_height > 1:
+            full_shape.append(h.pixel_height)
+        full_shape.append(h.pixel_width)
+        # Adjust shape for mipmap level
+        mipmap_shape = [mipmap_dimension(mipmap_level, d) for d in full_shape]
+        # Add channel dimension, if multichannel
+        if h.gl_base_internal_format == GL.GL_RG:
+            mipmap_shape.append(2)
+        elif h.gl_base_internal_format == GL.GL_RGB:
+            mipmap_shape.append(3)
+        elif h.gl_base_internal_format == GL.GL_RGBA:
+            mipmap_shape.append(4)
+        else:
+            assert h.gl_base_internal_format == GL.GL_RED
+        shape = tuple(mipmap_shape)
+        if h.gl_type == GL.GL_UNSIGNED_SHORT:
+            dtype = numpy.uint16
+        elif h.gl_type == GL.GL_UNSIGNED_BYTE:
+            dtype = numpy.uint8
+        else:
+            assert False # TODO: more data types...
+        buffer = self.image_data.mipmaps[mipmap_level] # array of bytes
+        result = numpy.ndarray(buffer=buffer, dtype=dtype, shape=shape)
+        return result
     
     @staticmethod
     def from_ndarray(array, multichannel=None, mipmap_filter='arthur'):
@@ -251,7 +282,11 @@ class KtxHeader(object):
             kv = io.BytesIO()
             kv.write(key)
             kv.write(b'\x00')
-            kv.write(value)
+            try:
+                kv.write(value)
+            except TypeError:
+                print (key, value)
+                raise
             size = len(kv.getvalue())
             padding = 3 - ((size + 3) % 4)
             self._write_uint32(key_values, size) # keyAndValueByteSize

@@ -210,18 +210,19 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
                 [0, 0, sz, oz],
                 [0, 0, 0, 1],], dtype='float32')
         print(xform)
-        kv[b'xyz_from_texcoord_xform'] = xform.tostring()
+        kv[b'xyz_from_texcoord_xform'] = xform.tobytes()
         #
-        center = numpy.array(ox + 0.5*sx, oy + 0.5*sy, oz + 0.5*sz)
+        center = numpy.array( (ox + 0.5*sx, oy + 0.5*sy, oz + 0.5*sz,), )
         radius = math.sqrt(sx*sx + sy*sy + sz*sz)/16.0
-        kv[b'bounding_sphere_center'] = center.tostring()
-        kv[b'bounding_sphere_radius'] = str(radius)
+        kv[b'bounding_sphere_center'] = center.tobytes()
+        kv[b'bounding_sphere_radius'] = str(radius).encode()
         # Write LZ4-compressed file
         with io.open('test.ktx.lz4', 'wb') as ktx_out:
             temp = io.BytesIO()
             ktx.write_stream(temp)
             compressed = lz4.dumps(temp.getvalue())
             ktx_out.write(compressed)
+        tifffile.imsave('test.tif', ktx.asarray(0))
 
 def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsample_xy=True, downsample_intensity=False):
     """
@@ -341,9 +342,10 @@ if __name__ == "__main__":
             "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif",
             ), )
     """
-    """
+    # """
     ktx_from_mouselight_octree_folder(
             input_folder_name='//fxt/nobackup2/mouselight/2015-06-19-johan-full', 
-            output_folder_name='')
-    """
-    test_create_mipmaps('arthur')
+            output_folder_name='',
+            mipmap_filter='arthur')
+    # """
+    # test_create_mipmaps('arthur')
