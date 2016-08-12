@@ -1,18 +1,23 @@
 #!/bin/env python
 
+# built-in python modules
 import sys
-from tifffile import TiffFile
-import tifffile
-import numpy
-from ktx import Ktx
-from OpenGL import GL
 import io
-import lz4
 import time
 from glob import glob
 import os
 import math
+import datetime
 
+# third party python modules
+import lz4
+from OpenGL import GL
+from tifffile import TiffFile
+import tifffile
+import numpy
+
+# local python modules
+import ktx
 from ktx.util import create_mipmaps, mipmap_dimension, interleave_channel_arrays, downsample_array_xy
 
 """
@@ -184,6 +189,9 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
             if len(fields) != 2:
                 continue
             metadata[fields[0].strip()] = fields[1].strip()
+    # Get original tiff file dimensions, to help compute geometry correctly
+    with tifffile.TiffFile(os.path.join(input_folder_name, "default.0.tif")) as tif:
+        original_tiff_dimensions = tif.asarray().shape
     # for k, v in metadata.items():
     #     print (k, v)
     if num_levels == 0:
@@ -192,37 +200,77 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
     folder = input_folder_name
     for level in range(num_levels):
         tiffs = glob(os.path.join(folder, "default.*.tif"))
-        ktx = ktx_from_tiff_channel_files(tiffs, mipmap_filter, downsample_xy, downsample_intensity)
-        # Additional metadata, from personal knowledge
-        kv = ktx.header.key_value_metadata
-        kv[b'distance_units'] = b'micrometers'
+        ktx_obj = ktx_from_tiff_channel_files(tiffs, mipmap_filter, downsample_xy, downsample_intensity)
+        # Populate custom block metadata
+        kh = ktx_obj.header
+        # kv = ktx_obj.header.key_value_metadata
+        # kv[b'distance_units'] = b'micrometers'
+        kh["distance_units"] = "micrometers"
         umFromNm = 1.0/1000.0
+        # Origin of volume (corner of corner voxel)
         ox = umFromNm*float(metadata['ox'])
         oy = umFromNm*float(metadata['oy'])
         oz = umFromNm*float(metadata['oz'])
-        # TODO: account for downsampling...
-        sx = umFromNm*ktx.header.pixel_width*float(metadata['sx']) 
-        sy = umFromNm*ktx.header.pixel_height*float(metadata['sy'])
-        sz = umFromNm*ktx.header.pixel_depth*float(metadata['sz'])
-        xform = numpy.array([ # TODO: use correct values in matrix...
+        # Size of entire volume
+        # Use original dimensions, to account for downsampling...
+        sx = umFromNm * original_tiff_dimensions[2] * float(metadata['sx']) 
+        sy = umFromNm * original_tiff_dimensions[1] * float(metadata['sy'])
+        sz = umFromNm * original_tiff_dimensions[0] * float(metadata['sz'])
+        xform = numpy.array([
                 [sx, 0, 0, ox],
                 [0, sy, 0, oy],
                 [0, 0, sz, oz],
                 [0, 0, 0, 1],], dtype='float32')
         # print(xform)
-        kv[b'xyz_from_texcoord_xform'] = xform.tobytes()
+        kh["xyz_from_texcoord_xform"] = xform
+        # print (kh["xyz_from_texcoord_xform"])
         #
         center = numpy.array( (ox + 0.5*sx, oy + 0.5*sy, oz + 0.5*sz,), )
         radius = math.sqrt(sx*sx + sy*sy + sz*sz)/16.0
-        kv[b'bounding_sphere_center'] = center.tobytes()
-        kv[b'bounding_sphere_radius'] = str(radius).encode()
-        # Write LZ4-compressed file
+        kh['bounding_sphere_center'] = center
+        kh['bounding_sphere_radius'] = radius
+        # Nominal resolution
+        resX = sx / ktx_obj.header.pixel_width
+        resY = sy / ktx_obj.header.pixel_height
+        resZ = sz / ktx_obj.header.pixel_depth
+        rms = math.sqrt(numpy.mean(numpy.square([resX, resY, resZ],)))
+        kh['nominal_resolution'] = rms
+        # print (kh['nominal_resolution'])
+        # Specimen ID
+        kh['specimen_id'] = os.path.split(input_folder_name)[-1]
+        # print (kh['specimen_id'])
+        # TODO: octree block ID
+        # Relation to parent tile/block
+        kh['mipmap_filter'] = mipmap_filter
+        relations = list()
+        if downsample_xy:
+            relations.append("downsampled 2X in X & Y")
+        if downsample_intensity:
+            relations.append("rescaled intensity to 8 bits")
+        if len(relations) == 0:
+            relations.append("unchanged")
+        kh['relation_to_parent'] = ";".join(relations)
+        # print (kh['relation_to_parent'])
+        kh['multiscale_level_id'] = level
+        kh['multiscale_total_levels'] = metadata['nl']
+        # TODO: Per channel statistics
+        kh['ktx_file_creation_date'] = datetime.datetime.now()
+        # print (kh['ktx_file_creation_date'])
+        import __main__
+        kh['ktx_file_creation_program'] = __main__.__file__
+        # print (kh['ktx_file_creation_program'])
+        kh['ktx_package_version'] = ktx.__version__
+        # print (kh['ktx_package_version'])
+        # TODO: Texture coordinate bounds for display
+        # Write LZ4-compressed KTX file
         with io.open('test.ktx.lz4', 'wb') as ktx_out:
             temp = io.BytesIO()
-            ktx.write_stream(temp)
+            ktx_obj.write_stream(temp)
             compressed = lz4.dumps(temp.getvalue())
             ktx_out.write(compressed)
-        tifffile.imsave('test.tif', ktx.asarray(0))
+        # Create tiff file for sanity check testing
+        # TODO: create tiffFromKtx.py as a separate tool
+        tifffile.imsave('test.tif', ktx_obj.asarray(0))
 
 def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsample_xy=True, downsample_intensity=False):
     """
@@ -245,8 +293,8 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
     if len(channels) == 2:
         channels.append(numpy.zeros_like(channels[0]))
     combined = interleave_channel_arrays(channels)
-    ktx = Ktx.from_ndarray(combined, mipmap_filter=mipmap_filter)
-    return ktx
+    ktx_obj = ktx.Ktx.from_ndarray(combined, mipmap_filter=mipmap_filter)
+    return ktx_obj
 
 def main():
     test_mipmap_dimension()
@@ -283,8 +331,8 @@ def main():
         c[:,:,:,i] = arrays[i]
     print (c.shape)
     dt = c.dtype
-    ktx = Ktx()
-    kh = ktx.header
+    ktx_obj = ktx.Ktx()
+    kh = ktx_obj.header
     if dt.byteorder == '<':
         kh.little_endian = True
     elif dt.byteorder == '=':
@@ -328,11 +376,11 @@ def main():
     kh.number_of_faces = 0
     kh.number_of_mipmap_levels = 1 # TODO zero for autogenerate?
     # TODO - key/value pairs for provenance
-    ktx.image_data.mipmaps.clear()
-    ktx.image_data.mipmaps.append(c.tostring())
+    ktx_obj.image_data.mipmaps.clear()
+    ktx_obj.image_data.mipmaps.append(c.tostring())
     with io.open('test.ktx.lz4', 'wb') as ktx_out:
         temp = io.BytesIO()
-        ktx.write_stream(temp)
+        ktx_obj.write_stream(temp)
         ktx_out.write(lz4.dumps(temp.getvalue()))
     
 if __name__ == "__main__":

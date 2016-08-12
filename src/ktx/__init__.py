@@ -8,6 +8,8 @@ import struct
 import sys
 
 from OpenGL import GL
+
+from .version import __version__
 from ktx.util import create_mipmaps, interleave_channel_arrays, mipmap_dimension
 
 class Ktx(object):
@@ -162,6 +164,25 @@ class KtxHeader(object):
     
     def __init__(self):
         self.key_value_metadata = collections.OrderedDict()
+    
+    # Expose key_value_metadata as top level dictionary
+    def __len__(self):
+        return len(self.key_value_metadata)
+    
+    def __getitem__(self, key):
+        return self.key_value_metadata[str(key).encode()]
+    
+    def __setitem__(self, key, value):
+        self.key_value_metadata[str(key).encode()] = str(value).encode()
+        
+    def __delitem__(self, key):
+        del self.key_value_metadata[str(key).encode()]
+        
+    def __iter__(self):
+        return self.key_value_metadata.__iter__()
+    
+    def __contains__(self, item):
+        return str(item).encode() in self.key_value_metadata
     
     def read_stream(self, file):
         # First load and check the binary file identifier for KTX files
