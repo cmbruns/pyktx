@@ -281,7 +281,7 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
         import __main__
         kh['ktx_file_creation_program'] = __main__.__file__
         # print (kh['ktx_file_creation_program'])
-        kh['ktx_package_version'] = ktx.__version__
+        kh['pyktx_version'] = ktx.__version__
         # print (kh['ktx_package_version'])
         # TODO: Texture coordinate bounds for display
         # Write LZ4-compressed KTX file
@@ -290,19 +290,16 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
             ktx_obj.write_stream(temp)
             compressed = lz4.dumps(temp.getvalue())
             ktx_out.write(compressed)
-        # Create tiff file for sanity check testing
+        with io.open('test.ktx', 'wb') as ktx_out:
+            temp = io.BytesIO()
+            ktx_obj.write_stream(temp)
+            ktx_out.write(temp.getvalue())        # Create tiff file for sanity check testing
         # TODO: create tiffFromKtx.py as a separate tool
         tifffile.imsave('test.tif', ktx_obj.asarray(0))
 
 def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsample_xy=True, downsample_intensity=False):
     """
     Load multiple single-channel tiff files, and create a multichannel Ktx object.
-    Mipmap voxel filtering options:
-      None - no mipmaps will be generated
-      'mean' - average of parent voxels
-      'max' - maximum of parent voxels
-      'arthur' - second largest intensity among parent voxels (good for 
-          preserving sparse, bright features, without too much noise)
     """
     channels = list()
     for fname in channel_tiff_names:

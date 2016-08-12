@@ -30,4 +30,4 @@ SOFTWARE.
 # 3) we can import it into your module
 # http://stackoverflow.com/questions/458550/standard-way-to-embed-version-into-python-package
 
-__version__ = '0.5a'
+__version__ = '0.5a1'
