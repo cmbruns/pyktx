@@ -17,6 +17,7 @@ setup(
     author = "Christopher Bruns",
     author_email = "cmbruns@rotatingpenguin.com",
     description = "Pure python tools for reading and writing KTX format OpenGL image texture files",
+    license="BSD",
     url = "https://github.com/cmbruns/pyktx",
     download_url = "https://github.com/cmbruns/pyktx/tarball/" + __version__,
     package_dir = {'': 'src'},
