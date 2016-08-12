@@ -6,7 +6,6 @@ import collections
 import io
 import struct
 import sys
-import numpy
 
 from OpenGL import GL
 from ktx.util import create_mipmaps, interleave_channel_arrays, mipmap_dimension
@@ -18,6 +17,7 @@ class Ktx(object):
         self.image_data = KtxImageData()
     
     def asarray(self, mipmap_level=0):
+        import numpy
         # Extract image shape
         h = self.header
         full_shape = list()
@@ -74,8 +74,8 @@ class Ktx(object):
             kh.little_endian = sys.byteorder == 'little'
         else:
             raise # TODO
-        print (dt.byteorder)
-        print (kh.little_endian)
+        # print (dt.byteorder)
+        # print (kh.little_endian)
         if dt.kind == 'u':
             if dt.itemsize == 2:
                 kh.gl_type = GL.GL_UNSIGNED_SHORT
