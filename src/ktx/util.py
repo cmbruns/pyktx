@@ -19,14 +19,14 @@ def _assort_subvoxels(input_array, shape):
     Rearrange pixels before downsampling a volume, so subvoxels to be combined are in a new fast-moving dimension
     """
     axis_offsets = list() # Enumerates samples to combine in each direction
-    axis_step = list()
+    axis_step = list() # Sampling stride in each dimension
     # Compute samples and stride for each dimension
     ndims = len(shape)
     for i in range(ndims):
         d = shape[i]
         factor = input_array.shape[i] / d
         axis_offsets.append( tuple(range(int(math.ceil(factor)))) ) # e.g. (0,1)
-        axis_step.append( int(math.floor(factor)) )
+        axis_step.append( int(math.floor(factor)) ) # e.g. "2"
     reduction_factor = 1
     for offset in axis_offsets:
         reduction_factor *= len(offset)
@@ -35,7 +35,7 @@ def _assort_subvoxels(input_array, shape):
     scratch = numpy.empty(shape=scratch_shape, dtype=input_array.dtype)
     # Compute strides into subvoxel list for each dimension
     pstrides = [1,] * ndims
-    pstride = 1 # X dimension stride will be 1
+    pstride = 1 # X (fastest) dimension stride will be 1
     for i in reversed(range(ndims)):
         pstrides[i] = pstride
         pstride *= len(axis_offsets[i])
@@ -72,6 +72,13 @@ def downsample_array_xy(array, filter_='arthur'):
     TODO: reduce duplicated code compared to create_mipmaps
     """
     # Initialize first dimension, Z, with no downsampling
+    shape = list(tuple(array.shape))
+    for i in (1,2): # Y and X dimensions
+        shape[i] = mipmap_dimension(1, shape[i])
+    scratch = _assort_subvoxels(array, shape)
+    ndims = len(shape)
+
+    """    
     shape = list( (array.shape[0],) )
     axis_offsets = list() # Enumerates samples to combine in each direction
     axis_offsets.append( (0,), )
@@ -121,6 +128,7 @@ def downsample_array_xy(array, filter_='arthur'):
     # Generate mipmap
     # Combine those subvoxels into the final mipmap
     # Avoid zeros in mean/arthur computation
+    """
     useNan = False
     if useNan:
         scratch = scratch.astype('float32') # 'float64' causes MemoryError?
