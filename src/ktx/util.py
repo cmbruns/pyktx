@@ -66,106 +66,69 @@ def _assort_subvoxels(input_array, shape):
             pass
     return scratch
 
+def _filter_assorted_array(assorted_array, filter_='mean'):
+    """
+    Apply box-like downsample filter to specially prearranged image array.
+    The input assorted_array must have the following properties:
+      * the final fastest-changing dimension contains all the parent voxels
+        that contribute to the new final downsampled voxel
+      * there is only a single color channel
+      * (see _assort_subvoxels)
+    Filtering options:
+      'mean' - average intensity of parent voxels
+      'max' - maximum intensity of parent voxels
+      'arthur' - second largest intensity among parent voxels (good for 
+          preserving sparse, bright features, without too much noise)
+    """
+    # Combine those subvoxels into the final mipmap
+    # Avoid zeros in mean/arthur computation
+    ndims = len(assorted_array) - 1 # "1" Because it has an extra dimension for the subvoxels
+    useNan = True # nanpercentile is SOOO SLOWWWW
+    if useNan and filter_ != 'arthur':
+        assorted_array = assorted_array.astype('float32') # 'float64' causes MemoryError?
+        # Zero means no data, so set to "NaN" for filtering
+        assorted_array[assorted_array==0] = numpy.nan
+    if filter_ == 'mean':
+        if useNan:
+            mipmap = numpy.nanmean(assorted_array, axis=ndims) # Permit calculation to default to float dtype
+        else:
+            mipmap = numpy.mean(assorted_array, axis=ndims) # Permit calculation to default to float dtype                
+    elif filter_ == 'max':
+        if useNan:
+            mipmap = numpy.nanmax(assorted_array, axis=ndims)
+        else:
+            mipmap = numpy.amax(assorted_array, axis=ndims)                
+    elif filter_ == 'arthur': # second largest pixel value
+        assorted_array = numpy.sort(assorted_array) # sort intensities of subvoxels along final dimension
+        s0 = assorted_array[:,:,:,-1] # Largest intensity per voxel
+        s1 = assorted_array[:,:,:,-2] # Second largest intensity per voxel
+        s1[s1==0] = s0[s1==0] # Replace zeros with largest element, in case second largest is zero/no-data
+        mipmap = s1
+        # percentile "82" yields second-largest value when number of elements is 7-12 (8 is canonical)
+        # mipmap = numpy.percentile(assorted_array, 82, axis=ndims, interpolation='higher')
+        # Forget it; nanpercentile is crazy slow
+        # mipmap = numpy.nanpercentile(assorted_array, 82, axis=ndims, interpolation='higher')
+    else:
+        raise Exception("Unknown downsampling filter %s" % filter_)
+    mipmap = numpy.nan_to_num(mipmap) # Convert NaN to zero before writing
+    mipmap = mipmap.astype(assorted_array.dtype) # Convert back to integer dtype AFTER calculation
+    return mipmap
+
 def downsample_array_xy(array, filter_='arthur'):
     """
     Downsample in X and Y directions, using second largest non-zero intensity.
-    TODO: reduce duplicated code compared to create_mipmaps
     """
-    # Initialize first dimension, Z, with no downsampling
     shape = list(tuple(array.shape))
     for i in (1,2): # Y and X dimensions
         shape[i] = mipmap_dimension(1, shape[i])
     scratch = _assort_subvoxels(array, shape)
-    ndims = len(shape)
-
-    """    
-    shape = list( (array.shape[0],) )
-    axis_offsets = list() # Enumerates samples to combine in each direction
-    axis_offsets.append( (0,), )
-    axis_step = list( (1,) )
-    # Downsample X and Y dimensions
-    for i in range(1,3):
-        d = mipmap_dimension(1, array.shape[i])
-        shape.append(d)
-        factor = array.shape[i] / d
-        if factor > 2.0:
-            axis_offsets.append((0, 1, 2,),) # combine three samples along odd-dimensioned axes
-            axis_step.append(2)
-        elif factor == 2.0:
-            axis_offsets.append((0, 1,),) # combine two samples along even-dimensioned axes
-            axis_step.append(2)
-        elif factor == 1.0:
-            axis_offsets.append((0,),) # single sample along one-length dimensions
-            axis_step.append(1)
-        else:
-            assert False # should not happen
-    shape = tuple(shape)
-    reduction_factor = 1
-    for offset in axis_offsets:
-        reduction_factor *= len(offset)
-    scratch_shape = list(shape)
-    scratch_shape.append(reduction_factor) # extra final dimension to hold subvoxel samples
-    scratch = numpy.empty(shape=scratch_shape, dtype=array.dtype)
-    sy = len(axis_offsets[1])
-    sx = len(axis_offsets[2])
-    ndims = 3 # TODO: don't hardcode this...
-    for z in axis_offsets[0]:
-        for y in axis_offsets[1]:
-            for x in axis_offsets[2]:
-                axis_start = (z, y, x)
-                # Generate slice to extract this subvoxel from the parent mipmap
-                parent_key = list()
-                for i in range(ndims):
-                    start = axis_start[i] # Initial offset along axis
-                    end = axis_start[i] + scratch_shape[i] * axis_step[i] # Final offset along axis, +1
-                    step = axis_step[i] # Stride along axis
-                    slice_ = slice(start, end, step) # partial key for our fancy data slurp, below
-                    parent_key.append(slice_)
-                subvoxel_index = x + y*sx + z*sx*sy
-                scratch_key = [slice(None), ] * ndims + [subvoxel_index,] # e.g. [:,:,:,0]
-                # Slurp every instance of this subvoxel into the scratch array
-                scratch[scratch_key] = array[parent_key]
-    # Generate mipmap
-    # Combine those subvoxels into the final mipmap
-    # Avoid zeros in mean/arthur computation
-    """
-    useNan = False
-    if useNan:
-        scratch = scratch.astype('float32') # 'float64' causes MemoryError?
-        # Zero means no data, so set to "NaN" for filtering
-        scratch[scratch==0] = numpy.nan
-    if filter_ == 'mean':
-        if useNan:
-            downsampled = numpy.nanmean(scratch, axis=ndims) # Permit calculation to default to float dtype
-        else:
-            downsampled = numpy.mean(scratch, axis=ndims) # Permit calculation to default to float dtype                
-    elif filter_ == 'max':
-        if useNan:
-            downsampled = numpy.nanmax(scratch, axis=ndims)
-        else:
-            downsampled = numpy.amax(scratch, axis=ndims)                
-    elif filter_ == 'arthur': # second largest pixel value
-        # percentile "82" yields second-largest value when number of elements is 7-12 (8 is canonical)
-        if useNan:
-            downsampled = numpy.nanpercentile(scratch, 82, axis=ndims, interpolation='higher')
-        else:
-            downsampled = numpy.percentile(scratch, 82, axis=ndims, interpolation='higher')
-    else:
-        assert False # TODO: unknown filter
-    downsampled = numpy.nan_to_num(downsampled) # Convert NaN to zero before writing
-    downsampled = downsampled.astype(array.dtype) # Convert back to integer dtype AFTER calculation
+    downsampled = _filter_assorted_array(scratch, filter_)
     return downsampled
 
 def create_mipmaps(mipmap0, filter_='arthur'):
     """
     Creates a sequence of mipmaps for a single-channel numpy image data array,
     Mipmap sizes follow OpenGL convention. 
-    Filtering options:
-      'mean' - average of parent voxels
-      'max' - maximum of parent voxels
-      'arthur' - second largest intensity among parent voxels (good for 
-          preserving sparse, bright features, without too much noise)
-
     """
     mipmaps = list()
     mipmaps.append(mipmap0) # First mipmap is the input impage
@@ -179,99 +142,9 @@ def create_mipmaps(mipmap0, filter_='arthur'):
     previous_mipmap = mipmap0
     while current_shape != smallest_shape:
         mipmap_level += 1
-        next_shape = tuple([mipmap_dimension(mipmap_level, biggest_shape[i]) for i in range(ndims)])
-        
-        """
-        # next_shape = list()
-        axis_offsets = list() # Enumerates samples to combine in each direction
-        axis_step = list()
-        for i in range(ndims):
-            d = mipmap_dimension(mipmap_level, biggest_shape[i])
-            # next_shape.append(d)
-            factor = current_shape[i]/d
-            if factor > 2.0:
-                axis_offsets.append((0, 1, 2,),) # combine three samples along odd-dimensioned axes
-                axis_step.append(2)
-            elif factor == 2.0:
-                axis_offsets.append((0, 1,),) # combine two samples along even-dimensioned axes
-                axis_step.append(2)
-            elif factor == 1.0:
-                axis_offsets.append((0,),) # single sample along one-length dimensions
-                axis_step.append(1)
-            else:
-                assert False # should not happen
-        # next_shape = tuple(next_shape)
-        # print(next_shape)
-        # How many voxels combine into one at this mipmap level?
-        reduction_factor = 1
-        for offset in axis_offsets:
-            reduction_factor *= len(offset)
-        # print ("  ", reduction_factor, axis_offsets)
-        # Re-assort data into a scratch buffer, so pixels to combine are in their own dimension
-        scratch_shape = list(next_shape)
-        scratch_shape.append(reduction_factor) # extra final dimension to hold subvoxel samples
-        # print(scratch_shape)
-        scratch = numpy.zeros(shape=scratch_shape, dtype=mipmap0.dtype)
-        # Loop over each subvoxel to incorporate from parent (typically 2-27 subvoxel types total)
-        # sz = len(axis_offsets[0])
-        sy = len(axis_offsets[1])
-        sx = len(axis_offsets[2])
-        for z in axis_offsets[0]:
-            for y in axis_offsets[1]:
-                for x in axis_offsets[2]:
-                    axis_start = (z, y, x)
-                    # Generate slice to extract this subvoxel from the parent mipmap
-                    parent_key = list()
-                    for i in range(ndims):
-                        start = axis_start[i] # Initial offset along axis
-                        end = axis_start[i] + scratch_shape[i] * axis_step[i] # Final offset along axis, +1
-                        step = axis_step[i] # Stride along axis
-                        slice_ = slice(start, end, step) # partial key for our fancy data slurp, below
-                        parent_key.append(slice_)
-                    subvoxel_index = x + y*sx + z*sx*sy
-                    scratch_key = [slice(None), ] * ndims + [subvoxel_index,] # e.g. [:,:,:,0]
-                    # Slurp every instance of this subvoxel into the scratch array
-                    scratch[scratch_key] = previous_mipmap[parent_key]
-        """
-                    
+        next_shape = tuple([mipmap_dimension(mipmap_level, biggest_shape[i]) for i in range(ndims)]) 
         scratch = _assort_subvoxels(previous_mipmap, next_shape)
-        
-        # Generate mipmap
-        # Combine those subvoxels into the final mipmap
-        # Avoid zeros in mean/arthur computation
-        useNan = True # nanpercentile is SOOO SLOWWWW
-        if useNan:
-            scratch = scratch.astype('float32') # 'float64' causes MemoryError?
-            # Zero means no data, so set to "NaN" for filtering
-            scratch[scratch==0] = numpy.nan
-        if filter_ == 'mean':
-            if useNan:
-                mipmap = numpy.nanmean(scratch, axis=ndims) # Permit calculation to default to float dtype
-            else:
-                mipmap = numpy.mean(scratch, axis=ndims) # Permit calculation to default to float dtype                
-        elif filter_ == 'max':
-            if useNan:
-                mipmap = numpy.nanmax(scratch, axis=ndims)
-            else:
-                mipmap = numpy.amax(scratch, axis=ndims)                
-        elif filter_ == 'arthur': # second largest pixel value
-            # percentile "82" yields second-largest value when number of elements is 7-12 (8 is canonical)
-            if useNan:
-                scratch = numpy.nan_to_num(scratch) # Put NaNs back to zeros
-                scratch = numpy.sort(scratch)
-                s0 = scratch[:,:,:,-1] # Largest element
-                s1 = scratch[:,:,:,-2] # Second largest element
-                s1[s1==0] = s0[s1==0] # Replace zeros with largest element
-                mipmap = s1
-                # mipmap = numpy.percentile(scratch, 82, axis=ndims, interpolation='higher')
-                # Forget it; nanpercentile is crazy slow
-                # mipmap = numpy.nanpercentile(scratch, 82, axis=ndims, interpolation='higher')
-            else:
-                mipmap = numpy.percentile(scratch, 82, axis=ndims, interpolation='higher')
-        else:
-            assert False # TODO: unknown filter
-        mipmap = numpy.nan_to_num(mipmap) # Convert NaN to zero before writing
-        mipmap = mipmap.astype(mipmap0.dtype) # Convert back to integer dtype AFTER calculation
+        mipmap = _filter_assorted_array(scratch, filter_)
         # print(mipmap.shape)
         current_shape = next_shape
         # print (mipmap_level, current_shape)
