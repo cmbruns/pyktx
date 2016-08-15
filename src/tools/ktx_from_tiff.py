@@ -32,7 +32,7 @@ import math
 import datetime
 
 # third party python modules
-import lz4
+import lz4 #@UnresolvedImport
 from OpenGL import GL
 from tifffile import TiffFile
 import tifffile
@@ -278,7 +278,7 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
         # TODO: Per channel statistics
         kh['ktx_file_creation_date'] = datetime.datetime.now()
         # print (kh['ktx_file_creation_date'])
-        import __main__
+        import __main__ #@UnresolvedImport
         kh['ktx_file_creation_program'] = __main__.__file__
         # print (kh['ktx_file_creation_program'])
         kh['pyktx_version'] = ktx.__version__
