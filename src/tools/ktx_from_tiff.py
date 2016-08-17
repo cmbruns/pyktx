@@ -32,7 +32,6 @@ import math
 import datetime
 
 # third party python modules
-import lz4 #@UnresolvedImport
 from OpenGL import GL
 from tifffile import TiffFile
 import tifffile
@@ -285,22 +284,21 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
         # print (kh['ktx_package_version'])
         # TODO: Texture coordinate bounds for display
         # Write LZ4-compressed KTX file
-        with io.open('test.ktx.lz4', 'wb') as ktx_out:
-            temp = io.BytesIO()
-            ktx_obj.write_stream(temp)
-            compressed = lz4.dumps(temp.getvalue())
-            ktx_out.write(compressed)
+        t1 = time.time()
         with io.open('test.ktx', 'wb') as ktx_out:
             temp = io.BytesIO()
             ktx_obj.write_stream(temp)
             ktx_out.write(temp.getvalue())        # Create tiff file for sanity check testing
+        t2 = time.time()
+        print ("Creating uncompressed ktx file took %.3f seconds" % (t2 - t1))
         # TODO: create tiffFromKtx.py as a separate tool
-        tifffile.imsave('test.tif', ktx_obj.asarray(0))
+        # tifffile.imsave('test.tif', ktx_obj.asarray(0))
 
 def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsample_xy=True, downsample_intensity=False):
     """
     Load multiple single-channel tiff files, and create a multichannel Ktx object.
     """
+    t0 = time.time()
     channels = list()
     for fname in channel_tiff_names:
         with TiffFile(fname) as tif:
@@ -308,11 +306,51 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
             if downsample_xy:
                 arr = downsample_array_xy(arr, mipmap_filter)
             channels.append(arr)
-    # TODO: remove this kludge to get a decent TIFF when there are only 2 channels
-    if len(channels) == 2:
-        channels.append(numpy.zeros_like(channels[0]))
+    t1 = time.time()
+    print ("loading tiff files took %.3f seconds" % (t1 - t0))
+    if downsample_intensity:
+        new_channels = list()
+        channel_transforms = list()
+        for channel in channels:
+            min_ = numpy.min(channel[channel != 0])
+            max_ = numpy.max(channel[channel != 0])
+            scale = 1.0
+            offset = min_ - 1
+            if max_ - min_ > 255: # need a lossy contraction of intensities
+                # Discard dimmest 2% of intensities
+                min_ = numpy.percentile(channel[channel != 0], 2)
+                median = numpy.median(channel[channel != 0])
+                max_ = numpy.max(channel[channel != 0])
+                # Discard intensities above 90% of max
+                max_ = median + 0.90 * (max_ - median)
+                print(min_, median, max_)
+                scale = (max_ - min_) / 255.0
+                offset = min_ - 1
+            if channel.dtype.itemsize == 2:
+                c = numpy.array(channel, dtype='float32')
+                c -= offset
+                c *= scale
+                c[c<0] = 0
+                if channel.dtype == numpy.uint16:
+                    dt = numpy.uint8
+                else:
+                    raise # TODO: more cases
+                c = numpy.array(c, dtype=dt)
+                new_channels.append(c)
+                channel_transforms.append( tuple([scale, offset]) )
+            else:
+                raise # TODO:
+        channels = new_channels
     combined = interleave_channel_arrays(channels)
     ktx_obj = ktx.Ktx.from_ndarray(combined, mipmap_filter=mipmap_filter)
+    # Include metadata for reconstructing original intensities
+    if downsample_intensity:
+        c = 0
+        for ct in channel_transforms:
+            ktx_obj.header['intensity_transform_%d'%c] = ct
+            c += 1
+    t2 = time.time()
+    print ("creating swizzled mipmapped ktx data took %.3f seconds" % (t2 - t1))    
     return ktx_obj
 
 def main():
@@ -397,10 +435,6 @@ def main():
     # TODO - key/value pairs for provenance
     ktx_obj.image_data.mipmaps.clear()
     ktx_obj.image_data.mipmaps.append(c.tostring())
-    with io.open('test.ktx.lz4', 'wb') as ktx_out:
-        temp = io.BytesIO()
-        ktx_obj.write_stream(temp)
-        ktx_out.write(lz4.dumps(temp.getvalue()))
     
 if __name__ == "__main__":
     """
@@ -413,6 +447,8 @@ if __name__ == "__main__":
     ktx_from_mouselight_octree_folder(
             input_folder_name='//fxt/nobackup2/mouselight/2015-06-19-johan-full', 
             output_folder_name='',
-            mipmap_filter='arthur')
+            mipmap_filter='arthur', 
+            downsample_xy=True,
+            downsample_intensity=True)
     # """
     # test_create_mipmaps('arthur')

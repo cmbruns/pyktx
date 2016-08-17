@@ -94,6 +94,8 @@ class Ktx(object):
             kh.little_endian = True
         elif dt.byteorder == '=':
             kh.little_endian = sys.byteorder == 'little'
+        elif dt.byteorder == '|': # not applicable
+            kh.little_endian = True # whatever
         else:
             raise # TODO
         # print (dt.byteorder)
@@ -124,6 +126,8 @@ class Ktx(object):
         if kh.gl_base_internal_format == GL.GL_RG:
             if kh.gl_type == GL.GL_UNSIGNED_SHORT:
                 kh.gl_internal_format = GL.GL_RG16UI
+            elif kh.gl_type == GL.GL_UNSIGNED_BYTE:
+                kh.gl_internal_format = GL.GL_RG8UI
             else:
                 raise
         elif kh.gl_base_internal_format == GL.GL_RGB:
@@ -193,7 +197,7 @@ class KtxHeader(object):
         return self.key_value_metadata[str(key).encode()]
     
     def __setitem__(self, key, value):
-        self.key_value_metadata[str(key).encode()] = str(value).encode()
+        self.key_value_metadata[str(key).encode()] = str(value).encode() + b'\x00'
         
     def __delitem__(self, key):
         del self.key_value_metadata[str(key).encode()]
