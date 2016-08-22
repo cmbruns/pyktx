@@ -329,7 +329,7 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
             if channel.dtype.itemsize == 2:
                 c = numpy.array(channel, dtype='float32')
                 c -= offset
-                c *= scale
+                c /= scale
                 c[c<0] = 0
                 if channel.dtype == numpy.uint16:
                     dt = numpy.uint8
