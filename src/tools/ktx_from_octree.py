@@ -251,17 +251,16 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
     reconstructed = list(channels)
     if downsample_intensity:
         # Reverse intensity scaling transform
-        reconstructed = [numpy.array(c, dtype='float64') for c in reconstructed]
-        # Rescale
-        reconstructed = [reconstructed[i] * channel_transforms[i][0] for i in range(len(reconstructed))]
-        # Offset
-        reconstructed = [reconstructed[i] + channel_transforms[i][1] for i in range(len(reconstructed))]
-        # Restore zero values
-        for i in range(len(reconstructed)):
-            c0 = channels[i]
-            c1 = reconstructed[i]
-            c1[c0 == 0] = 0 # zero means "no data"
-            c1[c1 < 0] = 1 # very small non-zero values become ones
+        for c in range(len(reconstructed)):
+            reconstructed[c] = numpy.array(reconstructed[c], dtype='float32')
+            c1 = reconstructed[c]
+            c1 *= channel_transforms[c][0] # Rescale
+            c1 += channel_transforms[c][1]
+            c0 = channels[c]
+            c1[c1 <= 0] = 1 # # very small non-zero values become ones
+            c1[c0 == 0] = 0 # original zero means "no data"
+            c1[c1 > 65535] = 65535 # Upper limit on 16 bit integer
+            reconstructed[c] = numpy.array(reconstructed[c], dtype='uint16')
     if downsample_xy:
         # TODO: Upsample to original size. This could be hard,
         #  but I need this to be able to compute RMS error
@@ -286,11 +285,12 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
         reconstructed = upsampled
     report_array_stats(reconstructed, "reconstructed")
     err = list()
+    # Compute root-mean-squared errors of reconstructed compared to original
     for c in range(len(original_channels)):
         orig = original_channels[c]
         recon = reconstructed[c]
         diff = recon - orig # deviation
-        diff = diff*diff # squared
+        diff = diff * diff # squared
         mean = numpy.mean(diff[orig != 0])
         err.append(math.sqrt(mean))
     print ("root-mean-square non-zero reconstructed channel intensity errors = %s" % (err,))
