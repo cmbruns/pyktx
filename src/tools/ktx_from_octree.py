@@ -73,7 +73,7 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
                               mipmap_filter='max', 
                               downsample_xy=True, 
                               downsample_intensity=False):
-    # Parse geometry data from top level transform.txt
+    # Parse geometry data from top level transform.txt file in octree folder
     metadata = dict()
     with io.open(os.path.join(input_folder_name, "transform.txt"), 'r') as transform_file:
         for line in transform_file:
@@ -112,7 +112,7 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
                 [sx, 0, 0, ox],
                 [0, sy, 0, oy],
                 [0, 0, sz, oz],
-                [0, 0, 0, 1],], dtype='float32')
+                [0, 0, 0, 1],], dtype='float64')
         # print(xform)
         kh["xyz_from_texcoord_xform"] = xform
         # print (kh["xyz_from_texcoord_xform"])
@@ -162,23 +162,41 @@ def ktx_from_mouselight_octree_folder(input_folder_name,
             ktx_out.write(temp.getvalue())        # Create tiff file for sanity check testing
         t2 = time.time()
         print ("Creating uncompressed ktx file took %.3f seconds" % (t2 - t1))
-        # TODO: create tiffFromKtx.py as a separate tool
-        # tifffile.imsave('test.tif', ktx_obj.asarray(0))
+
+def arrays_from_tiff_channel_files(channel_tiff_names):
+    channels = list()
+    for fname in channel_tiff_names:
+        with TiffFile(fname) as tif:
+            arr = tif.asarray()
+            channels.append(arr)
+    return channels
+
+def report_array_stats(channels, description):
+    channel_mins = [numpy.min(c[c!=0]) for c in channels]
+    print ("Minimum non-zero %s channel intensities = %s" % (description, channel_mins,))
+    channel_medians = [numpy.median(c[c!=0]) for c in channels]
+    print ("Median non-zero %s channel intensities = %s" % (description, channel_medians,))
+    channel_maxes = [numpy.max(c) for c in channels]
+    print ("Maximum %s channel intensities = %s" % (description, channel_maxes,))
+    channel_stddevs = [numpy.std(c[c!=0]) for c in channels]
+    print ("Standard deviation of non-zero %s channel intensities = %s" % (description, channel_stddevs,))
 
 def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsample_xy=True, downsample_intensity=False):
     """
     Load multiple single-channel tiff files, and create a multichannel Ktx object.
     """
     t0 = time.time()
-    channels = list()
-    for fname in channel_tiff_names:
-        with TiffFile(fname) as tif:
-            arr = tif.asarray()
-            if downsample_xy:
-                arr = downsample_array_xy(arr, mipmap_filter)
-            channels.append(arr)
+    channels = arrays_from_tiff_channel_files(channel_tiff_names)
+    original_channels = channels
     t1 = time.time()
-    print ("loading tiff files took %.3f seconds" % (t1 - t0))
+    print ("loading tiff files into RAM took %.3f seconds" % (t1 - t0))
+    report_array_stats(original_channels, "original TIFF")
+    if downsample_xy:
+        t0 = time.time()
+        channels = [downsample_array_xy(c, mipmap_filter) for c in original_channels]
+        t1 = time.time()
+        print ("downsampling tiff files in X and Y took %.3f seconds" % (t1 - t0))
+    t0 = time.time()
     if downsample_intensity:
         new_channels = list()
         channel_transforms = list()
@@ -194,14 +212,15 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
                 max_ = numpy.max(channel[channel != 0])
                 # Discard intensities above 90% of max
                 max_ = median + 0.90 * (max_ - median)
-                print(min_, median, max_)
+                # print(min_, median, max_)
                 scale = (max_ - min_) / 255.0
                 offset = min_ - 1
             if channel.dtype.itemsize == 2:
-                c = numpy.array(channel, dtype='float32')
+                c = numpy.array(channel, dtype='float64')
                 c -= offset
                 c /= scale
                 c[c<0] = 0
+                c[c>255] = 255
                 if channel.dtype == numpy.uint16:
                     dt = numpy.uint8
                 else:
@@ -212,7 +231,13 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
             else:
                 raise # TODO:
         channels = new_channels
+        t1 = time.time()
+        print ("downsampling tiff intensities took %.3f seconds" % (t1 - t0))
+    report_array_stats(channels, "final output")
+    t0 = time.time()
     combined = interleave_channel_arrays(channels)
+    t1 = time.time()
+    print ("interleaving color channels took %.3f seconds" % (t1 - t0))
     ktx_obj = ktx.Ktx.from_ndarray(combined, mipmap_filter=mipmap_filter)
     # Include metadata for reconstructing original intensities
     if downsample_intensity:
@@ -221,7 +246,28 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
             ktx_obj.header['intensity_transform_%d'%c] = ct
             c += 1
     t2 = time.time()
-    print ("creating swizzled mipmapped ktx data took %.3f seconds" % (t2 - t1))    
+    print ("computing mipmaps took %.3f seconds" % (t2 - t1))
+    # Reconstruct data and compute mean squared error
+    reconstructed = list(channels)
+    if downsample_intensity:
+        # Reverse intensity scaling transform
+        reconstructed = [numpy.array(c, dtype='float64') for c in reconstructed]
+        # Rescale
+        reconstructed = [reconstructed[i] * channel_transforms[i][0] for i in range(len(reconstructed))]
+        # Offset
+        reconstructed = [reconstructed[i] + channel_transforms[i][1] for i in range(len(reconstructed))]
+        # Restore zero values
+        for i in range(len(reconstructed)):
+            c0 = channels[i]
+            c1 = reconstructed[i]
+            c1[c0 == 0] = 0 # zero means "no data"
+            c1[c1 < 0] = 1 # very small non-zero values become ones
+    if downsample_xy:
+        # TODO: Upsample to original size. This could be hard,
+        #  but I need this to be able to compute RMS error
+        pass
+    report_array_stats(reconstructed, "reconstructed")
+    # TODO mean squared error
     return ktx_obj
  
 if __name__ == "__main__":
