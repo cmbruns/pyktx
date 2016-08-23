@@ -195,7 +195,7 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
         t0 = time.time()
         channels = [downsample_array_xy(c, mipmap_filter) for c in original_channels]
         t1 = time.time()
-        print ("downsampling tiff files in X and Y took %.3f seconds" % (t1 - t0))
+        print ("downsampling tiff files in X and Y using %s filter took %.3f seconds" % (mipmap_filter, t1 - t0))
     t0 = time.time()
     if downsample_intensity:
         new_channels = list()
@@ -247,7 +247,7 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
             c += 1
     t2 = time.time()
     print ("computing mipmaps took %.3f seconds" % (t2 - t1))
-    # Reconstruct data and compute mean squared error
+    # For debugging, reconstruct data and compute mean squared error
     reconstructed = list(channels)
     if downsample_intensity:
         # Reverse intensity scaling transform
@@ -265,8 +265,35 @@ def ktx_from_tiff_channel_files(channel_tiff_names, mipmap_filter='max', downsam
     if downsample_xy:
         # TODO: Upsample to original size. This could be hard,
         #  but I need this to be able to compute RMS error
-        pass
+        downsampled = reconstructed
+        down_shape = downsampled[0].shape
+        down_key = [slice(None),] * len(down_shape) # Select everything every time
+        upsampled = [numpy.zeros_like(c) for c in original_channels]
+        up_shape = upsampled[0].shape
+        # print (up_shape)
+        # TODO: If shape dimension is ODD, we should fill right half differently...
+        for c in range(len(original_channels)):
+            for dy in (0,1):
+                for dx in (0,1):
+                    up_key = [slice(None), # all Z
+                              slice(dy, up_shape[1], 2), # alternate y values
+                              slice(dx, up_shape[2], 2), # alternate x values
+                              ] + ([slice(None)] * (len(up_shape) - 3))
+                    u = upsampled[c]
+                    d = downsampled[c]
+                    u[up_key] = d[down_key]
+        # print (down_key, up_key)
+        reconstructed = upsampled
     report_array_stats(reconstructed, "reconstructed")
+    err = list()
+    for c in range(len(original_channels)):
+        orig = original_channels[c]
+        recon = reconstructed[c]
+        diff = recon - orig # deviation
+        diff = diff*diff # squared
+        mean = numpy.mean(diff[orig != 0])
+        err.append(math.sqrt(mean))
+    print ("root-mean-square non-zero reconstructed channel intensity errors = %s" % (err,))
     # TODO mean squared error
     return ktx_obj
  
