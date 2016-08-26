@@ -50,9 +50,10 @@ def _assort_subvoxels(input_array, shape):
     reduction_factor = 1
     for offset in axis_offsets:
         reduction_factor *= len(offset)
+    #
     scratch_shape = list(shape)
     scratch_shape.append(reduction_factor) # extra final dimension to hold subvoxel samples
-    scratch = numpy.empty(shape=scratch_shape, dtype=input_array.dtype)
+    scratch = numpy.zeros(shape=scratch_shape, dtype=input_array.dtype)
     # Compute strides into subvoxel list for each dimension
     pstrides = [1,] * ndims
     pstride = 1 # X (fastest) dimension stride will be 1
@@ -80,10 +81,48 @@ def _assort_subvoxels(input_array, shape):
         subvoxel_index = p
         scratch_key = [slice(None), ] * ndims + [subvoxel_index,] # e.g. [:,:,:,0]
         # Slurp every instance of this subvoxel into the scratch array
-        try:
-            scratch[scratch_key] = input_array[parent_key]
-        except ValueError:
-            pass
+        scratch[scratch_key] = input_array[parent_key]
+    # Zero certain subvoxels when downsampling odd numbered parent dimensions,
+    # So each parent voxel contributes to exactly one child subvoxel
+    # Reshape to make voxel zeroing easier
+    shape1 = tuple(scratch.shape) # shape with flattened subvoxels
+    subvoxel_shape = tuple([len(offset) for offset in axis_offsets])
+    shape2 = tuple(shape1[0:-1] + subvoxel_shape)
+    scratch.shape = shape2
+    for i in range(ndims):
+        input_len = input_array.shape[i]
+        output_len = shape[i]
+        if input_len != 2 * output_len + 1:
+            continue # Not the case we are looking for
+        if output_len < 2:
+            continue # No zeroing needed for input sizes 1 and 3
+        # Only one column gets to keep all three of its subsampled values
+        pivot_column = output_len // 2
+        # 
+        # For multidimensional subvoxels, we want to zero multiple subvoxels for this dimension
+        stride = pstrides[i]
+        #
+        # print (input_len, output_len, pivot_column)
+        # Clear third pixel of leftmost columns
+        left_key = [slice(None),] * i # Everything from earlier dimensions
+        left_key.append(slice(0, pivot_column)) # Left half of this dimension
+        left_key.extend([slice(None),] * (len(input_array.shape) - i - 1)) # later dimensions
+        # Subvoxel portion of key below
+        left_key.extend([slice(None),] * i) # Everything from earlier dimensions
+        left_key.append(slice(2, 3, 1)) # Clear the third subvoxel in this dimension
+        left_key.extend([slice(None),] * (len(input_array.shape) - i - 1))
+        scratch[left_key] = 0
+        # print (left_key)
+        # Clear first pixel of rightmost columns
+        right_key = [slice(None),] * i # Everything from earlier dimensions
+        right_key.append(slice(pivot_column + 1, output_len)) # Right half of this dimension
+        right_key.extend([slice(None),] * (len(input_array.shape) - i - 1)) # later dimensions
+        # Subvoxel portion of key below
+        right_key.extend([slice(None),] * i) # Everything from earlier dimensions
+        right_key.append(slice(0, 1, 1)) # Clear the first subvoxel in this dimension
+        right_key.extend([slice(None),] * (len(input_array.shape) - i - 1))
+        scratch[right_key] = 0
+    scratch.shape = shape1
     return scratch
 
 def _filter_assorted_array(assorted_array, filter_='mean'):

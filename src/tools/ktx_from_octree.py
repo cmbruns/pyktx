@@ -67,6 +67,10 @@ TODO: For converting rendered octree blocks, include the following precomputed:
       * texture coordinate bounds for display (because there might be padding...)
 """
 
+# TODO: Small memory version:
+#  * one channel at a time
+#  * one z-slice at a time (for initial downsampling and statistics)
+
 def ktx_from_mouselight_octree_folder(input_folder_name,
                               output_folder_name,
                               max_levels=1, # '0' means 'all'

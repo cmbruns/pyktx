@@ -68,26 +68,6 @@ TODO: For converting rendered octree blocks, include the following precomputed:
       * texture coordinate bounds for display (because there might be padding...)
 """
 
-def test_mipmap_dimension():
-    assert mipmap_dimension(level=0, full=0) == 1
-    assert mipmap_dimension(level=100, full=0) == 1
-    assert mipmap_dimension(level=100, full=100) == 1
-    assert mipmap_dimension(level=0, full=256) == 256
-    assert mipmap_dimension(level=1, full=256) == 128
-    assert mipmap_dimension(level=2, full=256) == 64
-    assert mipmap_dimension(level=3, full=256) == 32
-    assert mipmap_dimension(level=4, full=256) == 16
-    assert mipmap_dimension(level=5, full=256) == 8
-    assert mipmap_dimension(level=6, full=256) == 4
-    assert mipmap_dimension(level=7, full=256) == 2
-    assert mipmap_dimension(level=8, full=256) == 1
-    assert mipmap_dimension(level=9, full=256) == 1
-    assert mipmap_dimension(level=20, full=256) == 1
-    assert mipmap_dimension(level=0, full=3) == 3
-    assert mipmap_dimension(level=1, full=3) == 1
-    assert mipmap_dimension(level=2, full=3) == 1
-    
-
 def test_downsample_xy(filter_='arthur'):
     fname = "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif"
     with TiffFile(fname) as tif:
@@ -443,12 +423,12 @@ if __name__ == "__main__":
             "E:/brunsc/projects/ktxtiff/octree_tip/default.0.tif",
             ), )
     """
-    # """
+    """
     ktx_from_mouselight_octree_folder(
             input_folder_name='//fxt/nobackup2/mouselight/2015-06-19-johan-full', 
             output_folder_name='',
             mipmap_filter='arthur', 
             downsample_xy=True,
             downsample_intensity=True)
-    # """
-    # test_create_mipmaps('arthur')
+    """
+    test_create_mipmaps('arthur')
