@@ -307,7 +307,7 @@ if __name__ == "__main__":
             input_folder_name='//fxt/nobackup2/mouselight/2015-06-19-johan-full', 
             output_folder_name='',
             mipmap_filter='arthur', 
-            downsample_xy=True,
-            downsample_intensity=True,
+            downsample_xy=False,
+            downsample_intensity=False,
             max_levels=1)
 
