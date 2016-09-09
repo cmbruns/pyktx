@@ -125,14 +125,14 @@ class Ktx(object):
         # TODO: - lots of cases need to be enumerate here...
         if kh.gl_base_internal_format == GL.GL_RG:
             if kh.gl_type == GL.GL_UNSIGNED_SHORT:
-                kh.gl_internal_format = GL.GL_RG16UI
+                kh.gl_internal_format = GL.GL_RG16
             elif kh.gl_type == GL.GL_UNSIGNED_BYTE:
-                kh.gl_internal_format = GL.GL_RG8UI
+                kh.gl_internal_format = GL.GL_RG8
             else:
                 raise
         elif kh.gl_base_internal_format == GL.GL_RGB:
             if kh.gl_type == GL.GL_UNSIGNED_SHORT:
-                kh.gl_internal_format = GL.GL_RGB16UI
+                kh.gl_internal_format = GL.GL_RGB16
             else:
                 raise
         else:
