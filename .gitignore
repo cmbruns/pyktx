@@ -2,3 +2,6 @@
 /.pydevproject
 *.pyc
 /.settings
+/src/tools/*.tif
+/src/tools/*.ktx
+/src/tools/*.lz4
