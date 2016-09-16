@@ -5,3 +5,4 @@
 /src/tools/*.tif
 /src/tools/*.ktx
 /src/tools/*.lz4
+/src/tools/practice_octree_input

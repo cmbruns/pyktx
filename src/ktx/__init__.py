@@ -88,64 +88,13 @@ class Ktx(object):
             channel_count = 1
         # print (spatial_shape, channel_count)
         ktx = Ktx() 
-        dt = array.dtype
-        kh = ktx.header
-        if dt.byteorder == '<':
-            kh.little_endian = True
-        elif dt.byteorder == '=':
-            kh.little_endian = sys.byteorder == 'little'
-        elif dt.byteorder == '|': # not applicable
-            kh.little_endian = True # whatever
-        else:
-            raise # TODO
-        # print (dt.byteorder)
-        # print (kh.little_endian)
-        if dt.kind == 'u':
-            if dt.itemsize == 2:
-                kh.gl_type = GL.GL_UNSIGNED_SHORT
-            elif dt.itemsize == 1:
-                kh.gl_type = GL.GL_UNSIGNED_BYTE
-            else:
-                raise # TODO:
-        else:
-            raise # TODO:
-        kh.gl_type_size = dt.itemsize
-        #
-        if channel_count == 1:
-            kh.gl_format = kh.gl_base_internal_format = GL.GL_RED
-        elif channel_count == 2:
-            kh.gl_format = kh.gl_base_internal_format = GL.GL_RG
-        elif channel_count == 3:
-            kh.gl_format = kh.gl_base_internal_format = GL.GL_RGB
-        elif channel_count == 4:
-            kh.gl_format = kh.gl_base_internal_format = GL.GL_RGBA
-        else:
-            raise # TODO
-        #
-        # TODO: - lots of cases need to be enumerate here...
-        if kh.gl_base_internal_format == GL.GL_RG:
-            if kh.gl_type == GL.GL_UNSIGNED_SHORT:
-                kh.gl_internal_format = GL.GL_RG16
-            elif kh.gl_type == GL.GL_UNSIGNED_BYTE:
-                kh.gl_internal_format = GL.GL_RG8
-            else:
-                raise
-        elif kh.gl_base_internal_format == GL.GL_RGB:
-            if kh.gl_type == GL.GL_UNSIGNED_SHORT:
-                kh.gl_internal_format = GL.GL_RGB16
-            else:
-                raise
-        else:
-            raise # TODO
-        #
-        kh.pixel_width = spatial_shape[2]
-        kh.pixel_height = spatial_shape[1]
-        kh.pixel_depth = spatial_shape[0]
-        kh.number_of_array_elements = 0
-        kh.number_of_faces = 0
-        
+        ktx.header.populate_from_array_params(
+                shape=spatial_shape, 
+                dtype=array.dtype,
+                channel_count=channel_count)
         # 
         ktx.image_data.mipmaps.clear()
+        kh = ktx.header
         if mipmap_filter is not None:
             channel_mipmaps = list()
             for c in range(channel_count):
@@ -207,6 +156,61 @@ class KtxHeader(object):
     
     def __contains__(self, item):
         return str(item).encode() in self.key_value_metadata
+    
+    def populate_from_array_params(self, shape, dtype, channel_count):
+        if dtype.byteorder == '<':
+            self.little_endian = True
+        elif dtype.byteorder == '=':
+            self.little_endian = sys.byteorder == 'little'
+        elif dtype.byteorder == '|': # not applicable
+            self.little_endian = sys.byteorder == 'little'
+        else:
+            raise # TODO
+        # print (dtype.byteorder)
+        # print (self.little_endian)
+        if dtype.kind == 'u':
+            if dtype.itemsize == 2:
+                self.gl_type = GL.GL_UNSIGNED_SHORT
+            elif dtype.itemsize == 1:
+                self.gl_type = GL.GL_UNSIGNED_BYTE
+            else:
+                raise # TODO:
+        else:
+            raise # TODO:
+        self.gl_type_size = dtype.itemsize
+        #
+        if channel_count == 1:
+            self.gl_format = self.gl_base_internal_format = GL.GL_RED
+        elif channel_count == 2:
+            self.gl_format = self.gl_base_internal_format = GL.GL_RG
+        elif channel_count == 3:
+            self.gl_format = self.gl_base_internal_format = GL.GL_RGB
+        elif channel_count == 4:
+            self.gl_format = self.gl_base_internal_format = GL.GL_RGBA
+        else:
+            raise # TODO
+        #
+        # TODO: - lots of cases need to be enumerate here...
+        if self.gl_base_internal_format == GL.GL_RG:
+            if self.gl_type == GL.GL_UNSIGNED_SHORT:
+                self.gl_internal_format = GL.GL_RG16
+            elif self.gl_type == GL.GL_UNSIGNED_BYTE:
+                self.gl_internal_format = GL.GL_RG8
+            else:
+                raise
+        elif self.gl_base_internal_format == GL.GL_RGB:
+            if self.gl_type == GL.GL_UNSIGNED_SHORT:
+                self.gl_internal_format = GL.GL_RGB16
+            else:
+                raise
+        else:
+            raise # TODO
+        #
+        self.pixel_width = shape[2]
+        self.pixel_height = shape[1]
+        self.pixel_depth = shape[0]
+        self.number_of_array_elements = 0
+        self.number_of_faces = 0
     
     def read_stream(self, file):
         # First load and check the binary file identifier for KTX files
