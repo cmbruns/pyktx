@@ -160,8 +160,10 @@ def _filter_assorted_array(assorted_array, filter_='mean'):
             mipmap = numpy.amax(assorted_array, axis=ndims)                
     elif filter_ == 'arthur': # second largest pixel value
         assorted_array = numpy.sort(assorted_array) # sort intensities of subvoxels along final dimension
-        s0 = assorted_array[:,:,:,-1] # Largest intensity per voxel
-        s1 = assorted_array[:,:,:,-2] # Second largest intensity per voxel
+        brightest_key = [slice(None),]*ndims + [-1,]
+        second_brightest_key = [slice(None),]*ndims + [-2,]
+        s0 = assorted_array[brightest_key] # Largest intensity per voxel
+        s1 = assorted_array[second_brightest_key] # Second largest intensity per voxel
         s1[s1==0] = s0[s1==0] # Replace zeros with largest element, in case second largest is zero/no-data
         mipmap = s1
         # percentile "82" yields second-largest value when number of elements is 7-12 (8 is canonical)
@@ -212,6 +214,24 @@ def create_mipmaps(mipmap0, filter_='arthur'):
         mipmaps.append(mipmap)
     return mipmaps
 
+def mipmap_shapes(root_shape):
+    """
+    Creates a sequence of mipmap shapes.
+    Mipmap sizes follow OpenGL convention. 
+    """
+    mipmap_shapes = []
+    biggest_shape = tuple(root_shape)
+    mipmap_shapes.append(biggest_shape) # First mipmap is the input impage
+    ndims = len(biggest_shape)
+    smallest_shape = tuple([1] * ndims) # Final mipmap will have all dimensions equal to "1"
+    current_shape = tuple(biggest_shape)
+    mipmap_level = 0
+    while current_shape != smallest_shape:
+        mipmap_level += 1
+        current_shape = tuple([mipmap_dimension(mipmap_level, biggest_shape[i]) for i in range(ndims)]) 
+        mipmap_shapes.append(current_shape)
+    return mipmap_shapes
+
 def interleave_channel_arrays(arrays):
     "Combine multiple single channel stacks into one multi-channel stack"
     a = arrays[0]
@@ -226,6 +246,8 @@ def interleave_channel_arrays(arrays):
         assert arrays[i].shape == a.shape
         if len(shp) == 4:
             c[:,:,:,i] = arrays[i]
+        elif len(shp) == 3:
+            c[:,:,i] = arrays[i]
         elif len(shp) == 2:
             c[:,i] = arrays[i]
         else:
