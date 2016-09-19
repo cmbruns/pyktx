@@ -26,7 +26,7 @@ from ktx.util import mipmap_shapes, _assort_subvoxels, _filter_assorted_array,\
 class RenderedMouseLightOctree(object):
     "Represents a folder containing an octree hierarchy of RenderedTiffBlock volume images"
     
-    def __init__(self, folder):
+    def __init__(self, folder, mipmap_filter='arthur', downsample_xy=False, downsample_intensity=False):
         self.folder = folder
         # Parse the origin and voxel size from file "transform.txt" in the root folder
         self.transform = dict()
@@ -42,6 +42,9 @@ class RenderedMouseLightOctree(object):
         self.voxel_um = umFromNm * numpy.array([float(self.transform[key]) for key in ['sx', 'sy', 'sz']], dtype='float64')
         self.number_of_levels = int(self.transform['nl'])
         self.specimen_id = os.path.split(folder)[-1]
+        self.mipmap_filter = mipmap_filter
+        self.downsample_xy = downsample_xy
+        self.downsample_intensity = downsample_intensity
         # Get base image size, so we can convert voxel size into total volume size
         temp_block = RenderedTiffBlock(folder, self, [])
         temp_block._populate_size()
@@ -77,16 +80,16 @@ class RenderedMouseLightOctree(object):
 class RenderedTiffBlock(object):
     "RenderedBlock represents all channels of one rendered Mouse Light volume image block"
     
-    def __init__(self, folder, octree_root, octree_path, mipmap_filter='arthur', downsample_xy=False, downsample_intensity=False):
+    def __init__(self, folder, octree_root, octree_path):
         "Folder contains one or more 'default.0.tif', 'default.1.tif', etc. channel files"
         self.folder = folder
         self.octree_root = octree_root
         self.octree_path = octree_path
         self.channel_files = glob.glob(os.path.join(folder, "default.*.tif"))
         self.zyx_size = None
-        self.downsample_xy = downsample_xy
-        self.downsample_intensity = downsample_intensity
-        self.mipmap_filter = mipmap_filter
+        self.downsample_xy = octree_root.downsample_xy
+        self.downsample_intensity = octree_root.downsample_intensity
+        self.mipmap_filter = octree_root.mipmap_filter
 
     def _populate_size(self):
         """
@@ -281,6 +284,9 @@ class RenderedTiffBlock(object):
             for channel in channel_iterators:
                 zslice = next(channel)
                 # TODO: process slice, if necessary
+                if self.downsample_intensity:
+                    pass
+                    # TODO:
                 assert zslice.shape == zslice_shape0
                 channel_slices.append(zslice)
             image_size_bytes = self._process_tiff_slice(z_index, channel_slices, stream)
@@ -390,7 +396,42 @@ class RTBChannel(object):
         # Print histogram of incremental percentiles
         for i in range(1, 101):
             pass
-            # print(i, self.percentiles[i] - self.percentiles[i-1], self.percentiles[i])
+            print(i, self.percentiles[i] - self.percentiles[i-1], self.percentiles[i])
+        self.downsample_intensity_params = self._compute_intensity_downsample_params()
+        print(self.downsample_intensity_params)
+            
+    def _compute_intensity_downsample_params(self, min_quantile=20, max_base_quantile=90, max_sigma_buffer=4.5):
+        """
+        Use internal histogram data to estimate optimal sparse neuron intensity downsampling.
+        Input parameters:
+            min_quantile: the dimmest <min_quantile> percent of intensities will be truncated to value "1"
+            max_base_quantile: intensities above the intensity at <max_base_quantile> plus max_sigma_buffer 
+                standard deviations, will be truncated to value 255.
+        Output:
+            Three downsampling parameters:
+                black_level
+                white_level
+                gamma
+                result(I8) = (((I16 - offset) * 1/(black_level - white_level)) ^ gamma) * 255
+        """
+        # Compute intensity statistics in relevant range
+        mean_intensity = 0
+        for p in range(min_quantile, max_base_quantile+1):
+            mean_intensity += self.percentiles[p]
+        mean_intensity /= float(max_base_quantile - min_quantile + 1)
+        variance = 0
+        for p in range(min_quantile, max_base_quantile+1):
+            d = self.percentiles[p] - mean_intensity
+            variance += d*d
+        variance /= float(max_base_quantile - min_quantile + 1)
+        stddev = math.sqrt(variance)
+        print("Mean = %.1f, stddev = %.1f" % (mean_intensity, stddev))
+        black_level = self.percentiles[min_quantile]
+        white_level = int(self.percentiles[max_base_quantile] + max_sigma_buffer * stddev)
+        white_level = min(white_level, self.percentiles[100]) # Don't go above max intensity
+        gamma = 0.5
+        return black_level, white_level, gamma
+        
 
 def _exercise_histogram():
     "for testing histogram construction during developement"
@@ -400,7 +441,7 @@ def _exercise_histogram():
 
 def _exercise_octree():
     "for testing octree walking during development"
-    o = RenderedMouseLightOctree(os.path.abspath('./practice_octree_input'))
+    o = RenderedMouseLightOctree(os.path.abspath('./practice_octree_input'), downsample_intensity=True)
     # Visit top layer of the octree
     for b in o.iter_blocks(max_level=0):
         print (b.channel_files)
