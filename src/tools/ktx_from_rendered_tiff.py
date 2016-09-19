@@ -44,7 +44,7 @@ class RenderedMouseLightOctree(object):
         self.specimen_id = os.path.split(folder)[-1]
         # Get base image size, so we can convert voxel size into total volume size
         temp_block = RenderedTiffBlock(folder, self, [])
-        temp_block._populate_size_and_histograms()
+        temp_block._populate_size()
         # Rearrange image size from zyx to xyz
         self.volume_voxels = numpy.array([temp_block.zyx_size[i] for i in [2, 1, 0]], dtype='uint32')
         # Compute total volume size in micrometers
@@ -88,6 +88,15 @@ class RenderedTiffBlock(object):
         self.downsample_intensity = downsample_intensity
         self.mipmap_filter = mipmap_filter
 
+    def _populate_size(self):
+        """
+        Cheapest pre-pass to get just the image size
+        """
+        channel = RTBChannel(self.channel_files[0])
+        channel._populate_size_and_histogram()
+        self.zyx_size = channel.zyx_size
+        self.dtype = channel.dtype
+
     def _populate_size_and_histograms(self):
         """
         First pass of small-memory tile processing.
@@ -130,7 +139,7 @@ class RenderedTiffBlock(object):
         # fait accompli.
         # Initialize with top-level origin and size
         self.origin_um = numpy.array(self.octree_root.origin_um, copy=True)
-        self.volume_um = numpy.array(self.octree_root.origin_um, copy=True)
+        self.volume_um = numpy.array(self.octree_root.volume_um, copy=True)
         for level in self.octree_path: # range 0-7
             self.volume_um *= 0.5 # Every deeper level is half the size of the lower level
             # Shift origin if this is a right/bottom/far sub-block
@@ -183,13 +192,14 @@ class RenderedTiffBlock(object):
         kh['pyktx_version'] = ktx.__version__
 
     def _process_mipmap_parent_slice(self, mipmap_level, parent_z_index, channel_slices):
+        "Recursive method to incrementally update deeper mipmaps, one slice at a time"
         if mipmap_level >= len(self.mipmap_shapes):
             # Parent is presumably the deepest mipmap level
             assert parent_z_index == 0
             assert channel_slices[0].shape == (1,1)
             return # Too Deep. No mipmap here
-        "Recursive method to incrementally update deeper mipmaps, one slice at a time"
-        # Maintain a deque of three parent slices
+        # print("Processing mipmap level %d, slice %d" % (mipmap_level-1, parent_z_index))
+        # Maintain a deque of up to three parent slices, to save memory
         parent_slices = self._mipmap_parent_slice_cache[mipmap_level]
         parent_slices.append(channel_slices)
         if len(parent_slices) > 3:
@@ -197,23 +207,49 @@ class RenderedTiffBlock(object):
         # Determine whether we are ready to create a new mipmap slice
         daughter_slices = self._mipmap_slice_cache[mipmap_level]
         next_daughter_slice_index = len(daughter_slices)
-        needed_parent_slice_index = next_daughter_slice_index * 2
+        needed_parent_slice_index = next_daughter_slice_index * 2 + 1 # zero-based, assuming two parent slices per daughter slice
         parent_sz = self.mipmap_shapes[mipmap_level - 1][0]
+        needed_parent_slice_index = min(parent_sz-1, needed_parent_slice_index) # For single-slice parents
         daughter_sz = self.mipmap_shapes[mipmap_level][0]
-        if parent_sz % 2 > 0: # Odd parent z-dimension
+        use_thick_middle_slice = False
+        if parent_sz % 2 > 0 and parent_sz >= 3: # Odd parent z-dimension
             if next_daughter_slice_index >= daughter_sz // 2:
                 needed_parent_slice_index += 1 # Second half of stack reads one slice later
+                if next_daughter_slice_index >= daughter_sz // 2:
+                    use_thick_middle_slice = True # This exact slice is the fat one in the downsampling stack
         if parent_z_index < needed_parent_slice_index:
             return
         assert parent_z_index == needed_parent_slice_index
         daughter_channel_slices = []
-        # TODO: downsample parent_slices to daughter_slices
+        # Downsample parent_slices to daughter_slices
+        for channel in range(len(channel_slices)):
+            if use_thick_middle_slice: # Special thick slice in the very middle uses three parent slices
+                parent_channels = [parent_slices[i][channel] for i in [-3,-2,-1,]]
+            elif parent_sz < 2:
+                parent_channels = [parent_slices[i][channel] for i in [-1,]] # One slice: sometimes there is only one
+            else:
+                parent_channels = [parent_slices[i][channel] for i in [-2,-1,]] # Usually we combine two parent slices
+            desired_shape = list(self.mipmap_shapes[mipmap_level])
+            desired_shape[0] = 1 # Just one slice, please, but still a 3D shape, for the moment
+            desired_shape = tuple(desired_shape)
+            arr = numpy.array(parent_channels, dtype=self.dtype, copy=True)
+            scratch = _assort_subvoxels(arr, desired_shape)
+            new_slice = _filter_assorted_array(scratch, self.mipmap_filter)
+            assert new_slice.shape == desired_shape
+            # Reshape again, to remove singleton z-dimension, before storing in slice array
+            shape_2d = tuple(desired_shape[1:])
+            new_slice.shape = shape_2d
+            assert new_slice.shape == shape_2d
+            daughter_channel_slices.append(new_slice)
         daughter_slices.append(daughter_channel_slices)
         # Recurse to deeper mipmap level
         self._process_mipmap_parent_slice(mipmap_level + 1, next_daughter_slice_index, daughter_channel_slices)
 
     def _process_tiff_slice(self, z_index, channel_slices, output_stream):
-        # Interleave individual color channels into one multicolor slice
+        """
+        Interleave individual color channels into one multicolor slice.
+        And also accumulate deeper mipmaps levels.
+        """
         zslice0 = interleave_channel_arrays(channel_slices)
         # Save this slice to ktx file on disk
         data0 = zslice0.tostring()
@@ -226,7 +262,10 @@ class RenderedTiffBlock(object):
         return image_size
     
     def _stream_first_mipmap(self, stream, filter_='arthur'):
-        "small-memory implementation for streaming first mipmap from TIFF channel files to KTX file"
+        """
+        Small-memory implementation for streaming first mipmap from TIFF channel files to KTX file.
+        Simultaneously accumulates deeper mipmap levels in memory, for later streaming.
+        """
         # 1) Open all the channel tiff files
         channel_iterators = []
         tif_streams = []
@@ -251,17 +290,31 @@ class RenderedTiffBlock(object):
         # 3) Close all the input tif files
         for tif in tif_streams:
             tif.close()
-        # 4) Consolidate second mipmap
-        # TODO:
+            
+    def _stream_other_mipmaps(self, stream):
+        for mipmap_level in range(1, len(self.mipmap_shapes)):
+            daughter_slices = self._mipmap_slice_cache[mipmap_level]
+            for z_index in range(len(daughter_slices)):
+                zslice_channels = daughter_slices[z_index]
+                zslice = interleave_channel_arrays(zslice_channels)
+                # Save this slice to ktx file on disk
+                slice_bytes = zslice.tostring()
+                image_size_bytes = len(slice_bytes) * self.mipmap_shapes[mipmap_level][0]
+                if z_index == 0: # Write total number of bytes for this mipmap before first slice
+                    self.ktx_header._write_uint32(stream, image_size_bytes)
+                stream.write(slice_bytes)
+            # Pad final bytes of mipmap in output file
+            mip_padding_size = 3 - ((image_size_bytes + 3) % 4)
+            stream.write(mip_padding_size * b'\x00')
     
     def write_ktx_file(self, stream):
         if self.zyx_size is None:
             self._populate_size_and_histograms()
-        output_shape = self.zyx_size # TODO: consider options
         self.ktx_header.number_of_mipmap_levels = len(self.mipmap_shapes)
         self.ktx_header.write_stream(stream)
+        # Stream from input TIFF files, while writing first mipmap to ktx
         self._stream_first_mipmap(stream)
-        # TODO: stream from input TIFF files, while writing first mipmap to ktx
+        self._stream_other_mipmaps(stream)
 
 
 class RTBChannel(object):
@@ -271,6 +324,29 @@ class RTBChannel(object):
     def __init__(self, file_name):
         self.file_name = file_name
         
+    def _populate_size(self):
+        """
+        Minimal parsing of size and type
+        """
+        tif = TIFF.open(self.file_name, mode='r')
+        sz = 0
+        sxy = None
+        dtype = None
+        for page in tif.iter_images():
+            sy = page.shape[0]
+            sx = page.shape[1]
+            if sxy is None:
+                sxy = tuple([sx, sy,])
+                dtype = page.dtype
+            else:
+                assert sxy == tuple([sx, sy,]) # All slices must be the same size
+                assert page.dtype == dtype
+            sz += 1
+        tif.close()
+        size = tuple([sz, sy, sx,])
+        self.zyx_size = size
+        self.dtype = dtype
+
     def _populate_size_and_histogram(self):
         """
         First pass of small-memory tile processing.
@@ -291,8 +367,8 @@ class RTBChannel(object):
             if min_non_zero == 0:
                 min_non_zero = i
             max_non_zero = i
-        print("Total non-zero intensity voxel count = ", total_non_zero)
-        print("Total zero intensity voxel count = ", self.histogram[0])
+        # print("Total non-zero intensity voxel count = ", total_non_zero)
+        # print("Total zero intensity voxel count = ", self.histogram[0])
         accumulated = 0
         percentage = 0.0
         # print(0, min_non_zero)
