@@ -79,6 +79,17 @@ class RenderedTiffBlock(object):
                 shape=self.zyx_size, 
                 dtype=self.dtype, 
                 channel_count=len(self.channels))
+        
+    def _process_tiff_slice(self, z_index, channel_slices, output_stream):
+        # Interleave individual color channels into one multicolor slice
+        zslice0 = interleave_channel_arrays(channel_slices)
+        # Save this slice to ktx file on disk
+        data0 = zslice0.tostring()
+        image_size = len(data0) * self.mipmap_shapes[0][0]
+        if z_index == 0: # Write total number of bytes for this mipmap before first slice
+            self.ktx_header._write_uint32(output_stream, image_size)
+        output_stream.write(data0)
+        return image_size
     
     def _stream_first_mipmap(self, stream, filter_='arthur'):
         "small-memory implementation for streaming first mipmap from TIFF channel files to KTX file"
@@ -92,7 +103,6 @@ class RenderedTiffBlock(object):
         # 2) Load and process one z-slice at a time
         zslice_shape0 = self.mipmap_shapes[0][1:3] # for sanity checking
         zslice_shape1 = self.mipmap_shapes[1][1:3]
-        is_first_slice = True
         # Working version of next level mipmap with have too many slices at first
         mipmap1_shape = list(self.mipmap_shapes[1])
         sz = self.zyx_size[0]
@@ -113,15 +123,8 @@ class RenderedTiffBlock(object):
                 smaller_zslice = _filter_assorted_array(scratch, filter_)
                 assert smaller_zslice.shape == zslice_shape1
                 smaller_channel_slices.append(smaller_zslice)
-            # Interleave individual color channels into one multicolor slice
-            zslice0 = interleave_channel_arrays(channel_slices)
-            # Save this slice to ktx file on disk
-            data0 = zslice0.tostring()
-            if is_first_slice: # Write total number of bytes for this mipmap before first slice
-                image_size = len(data0) * self.mipmap_shapes[0][0]
-                self.ktx_header._write_uint32(stream, image_size)
-                is_first_slice = False
-            stream.write(data0)
+            image_size = self._process_tiff_slice(z_index, channel_slices, stream)
+            # TODO: might need to keep second mipmap channels separate until it's compacted to final size
             zslice1 = interleave_channel_arrays(smaller_channel_slices)
             mipmap1[z_index,:,:,:] = zslice1
             # TODO - store second mipmap slices somewhere
