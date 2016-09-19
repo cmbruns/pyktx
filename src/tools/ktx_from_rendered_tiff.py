@@ -10,8 +10,10 @@ import io
 import re
 import math
 import datetime
+from collections import deque
 
 import numpy
+import libtiff
 from libtiff import TIFF
 
 from small_memory_histogram import histogram_tiff_file
@@ -110,6 +112,10 @@ class RenderedTiffBlock(object):
                 dtype=self.dtype, 
                 channel_count=len(self.channels))
         self._populate_octree_metadata()
+        self.mipmap_shapes = mipmap_shapes(self.zyx_size) # TODO - is this the correct size always?
+        self._mipmap_parent_slice_cache = [deque() for _ in range(len(self.mipmap_shapes))] # Holds up to three recent slices at each mipmap level
+        assert len(self._mipmap_parent_slice_cache) == len(self.mipmap_shapes)
+        self._mipmap_slice_cache = [list() for _ in range(len(self.mipmap_shapes))] # Holds all mipmap slices from levels one and higher
         
     def _populate_octree_metadata(self):
         kh = self.ktx_header
@@ -176,6 +182,36 @@ class RenderedTiffBlock(object):
         # print (kh['ktx_file_creation_program'])
         kh['pyktx_version'] = ktx.__version__
 
+    def _process_mipmap_parent_slice(self, mipmap_level, parent_z_index, channel_slices):
+        if mipmap_level >= len(self.mipmap_shapes):
+            # Parent is presumably the deepest mipmap level
+            assert parent_z_index == 0
+            assert channel_slices[0].shape == (1,1)
+            return # Too Deep. No mipmap here
+        "Recursive method to incrementally update deeper mipmaps, one slice at a time"
+        # Maintain a deque of three parent slices
+        parent_slices = self._mipmap_parent_slice_cache[mipmap_level]
+        parent_slices.append(channel_slices)
+        if len(parent_slices) > 3:
+            parent_slices.popleft() # For small-memory, only keep a maximum of three parent slices queued
+        # Determine whether we are ready to create a new mipmap slice
+        daughter_slices = self._mipmap_slice_cache[mipmap_level]
+        next_daughter_slice_index = len(daughter_slices)
+        needed_parent_slice_index = next_daughter_slice_index * 2
+        parent_sz = self.mipmap_shapes[mipmap_level - 1][0]
+        daughter_sz = self.mipmap_shapes[mipmap_level][0]
+        if parent_sz % 2 > 0: # Odd parent z-dimension
+            if next_daughter_slice_index >= daughter_sz // 2:
+                needed_parent_slice_index += 1 # Second half of stack reads one slice later
+        if parent_z_index < needed_parent_slice_index:
+            return
+        assert parent_z_index == needed_parent_slice_index
+        daughter_channel_slices = []
+        # TODO: downsample parent_slices to daughter_slices
+        daughter_slices.append(daughter_channel_slices)
+        # Recurse to deeper mipmap level
+        self._process_mipmap_parent_slice(mipmap_level + 1, next_daughter_slice_index, daughter_channel_slices)
+
     def _process_tiff_slice(self, z_index, channel_slices, output_stream):
         # Interleave individual color channels into one multicolor slice
         zslice0 = interleave_channel_arrays(channel_slices)
@@ -185,6 +221,8 @@ class RenderedTiffBlock(object):
         if z_index == 0: # Write total number of bytes for this mipmap before first slice
             self.ktx_header._write_uint32(output_stream, image_size)
         output_stream.write(data0)
+        # Propagate deeper mipmap construction
+        self._process_mipmap_parent_slice(mipmap_level=1, parent_z_index=z_index, channel_slices=channel_slices)
         return image_size
     
     def _stream_first_mipmap(self, stream, filter_='arthur'):
@@ -198,34 +236,17 @@ class RenderedTiffBlock(object):
             tif_streams.append(tif)
         # 2) Load and process one z-slice at a time
         zslice_shape0 = self.mipmap_shapes[0][1:3] # for sanity checking
-        zslice_shape1 = self.mipmap_shapes[1][1:3]
-        # Working version of next level mipmap with have too many slices at first
-        mipmap1_shape = list(self.mipmap_shapes[1])
         sz = self.zyx_size[0]
-        mipmap1_shape[0] = sz
-        mipmap1_shape.append(len(self.channels))
-        # TODO: This bulk allocation might be the next memory bottleneck
-        mipmap1 = numpy.zeros(shape=mipmap1_shape, dtype=self.dtype) # save second mipmap level while we are there
         for z_index in range(sz):
             channel_slices = [] # For level zero mipmap
-            smaller_channel_slices = [] # For level one mipmap
             for channel in channel_iterators:
                 zslice = next(channel)
                 # TODO: process slice, if necessary
                 assert zslice.shape == zslice_shape0
                 channel_slices.append(zslice)
-                # Downsample XY for next deeper mipmap level
-                scratch = _assort_subvoxels(zslice, zslice_shape1)
-                smaller_zslice = _filter_assorted_array(scratch, filter_)
-                assert smaller_zslice.shape == zslice_shape1
-                smaller_channel_slices.append(smaller_zslice)
-            image_size = self._process_tiff_slice(z_index, channel_slices, stream)
-            # TODO: might need to keep second mipmap channels separate until it's compacted to final size
-            zslice1 = interleave_channel_arrays(smaller_channel_slices)
-            mipmap1[z_index,:,:,:] = zslice1
-            # TODO - store second mipmap slices somewhere
+            image_size_bytes = self._process_tiff_slice(z_index, channel_slices, stream)
         # Pad final bytes of mipmap in output file
-        mip_padding_size = 3 - ((image_size + 3) % 4)
+        mip_padding_size = 3 - ((image_size_bytes + 3) % 4)
         stream.write(mip_padding_size * b'\x00')
         # 3) Close all the input tif files
         for tif in tif_streams:
@@ -237,7 +258,6 @@ class RenderedTiffBlock(object):
         if self.zyx_size is None:
             self._populate_size_and_histograms()
         output_shape = self.zyx_size # TODO: consider options
-        self.mipmap_shapes = mipmap_shapes(output_shape)
         self.ktx_header.number_of_mipmap_levels = len(self.mipmap_shapes)
         self.ktx_header.write_stream(stream)
         self._stream_first_mipmap(stream)
@@ -293,13 +313,14 @@ class RTBChannel(object):
         self.percentiles[100] = max_non_zero
         # Print histogram of incremental percentiles
         for i in range(1, 101):
-            print(i, self.percentiles[i] - self.percentiles[i-1], self.percentiles[i])
+            pass
+            # print(i, self.percentiles[i] - self.percentiles[i-1], self.percentiles[i])
 
 def _exercise_histogram():
     "for testing histogram construction during developement"
     b = RenderedTiffBlock('.')
     b._populate_size_and_histograms()
-    print (b.zyx_size, b.dtype)
+    # print (b.zyx_size, b.dtype)
 
 def _exercise_octree():
     "for testing octree walking during development"
@@ -314,5 +335,6 @@ def _exercise_octree():
 
 
 if __name__ == '__main__':
+    libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
     _exercise_octree()
