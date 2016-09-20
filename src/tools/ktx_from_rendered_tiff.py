@@ -80,7 +80,7 @@ class RenderedMouseLightOctree(object):
         if level == max_level:
             return
         for subfolder in [str(i) for i in range(1, 9)]:
-            print (subfolder)
+            # print (subfolder)
             for b in self.iter_blocks(max_level=max_level - 1, folder=os.path.join(folder, subfolder)):
                 yield b
 
@@ -95,9 +95,6 @@ class RenderedTiffBlock(object):
         self.octree_path = octree_path
         self.channel_files = glob.glob(os.path.join(folder, "default.*.tif"))
         self.zyx_size = None
-        self.downsample_xy = octree_root.downsample_xy
-        self.downsample_intensity = octree_root.downsample_intensity
-        self.mipmap_filter = octree_root.mipmap_filter
 
     def _populate_size(self):
         """
@@ -186,11 +183,11 @@ class RenderedTiffBlock(object):
         # Specimen ID
         kh['specimen_id'] = self.octree_root.specimen_id
         # Relation to parent tile/block
-        kh['mipmap_filter'] = self.mipmap_filter
+        kh['mipmap_filter'] = self.octree_root.mipmap_filter
         relations = list()
-        if self.downsample_xy:
+        if self.octree_root.downsample_xy:
             relations.append("downsampled 2X in X & Y")
-        if self.downsample_intensity:
+        if self.octree_root.downsample_intensity:
             relations.append("rescaled intensity to 8 bits")
         if len(relations) == 0:
             relations.append("unchanged")
@@ -246,7 +243,7 @@ class RenderedTiffBlock(object):
             desired_shape = tuple(desired_shape)
             arr = numpy.array(parent_channels, dtype=self.octree_root.output_dtype, copy=True)
             scratch = _assort_subvoxels(arr, desired_shape)
-            new_slice = _filter_assorted_array(scratch, self.mipmap_filter)
+            new_slice = _filter_assorted_array(scratch, self.octree_root.mipmap_filter)
             assert new_slice.shape == desired_shape
             # Reshape again, to remove singleton z-dimension, before storing in slice array
             shape_2d = tuple(desired_shape[1:])
@@ -293,7 +290,8 @@ class RenderedTiffBlock(object):
             for channel in self.channels:
                 zslice = next(channel.tif_iterator)
                 # Process slice, if necessary
-                if self.downsample_intensity and self.input_dtype != self.octree_root.output_dtype:
+                # 1) Intensity downsamping
+                if self.octree_root.downsample_intensity and self.input_dtype != self.octree_root.output_dtype:
                     black_level = channel.downsample_intensity_params[0]
                     white_level = channel.downsample_intensity_params[1]
                     gamma = channel.downsample_intensity_params[2]
@@ -418,9 +416,9 @@ class RTBChannel(object):
         # Print histogram of incremental percentiles
         for i in range(1, 101):
             pass
-            print(i, self.percentiles[i] - self.percentiles[i-1], self.percentiles[i])
+            # print(i, self.percentiles[i] - self.percentiles[i-1], self.percentiles[i])
         self.downsample_intensity_params = self._compute_intensity_downsample_params()
-        print(self.downsample_intensity_params)
+        # print(self.downsample_intensity_params)
             
     def _compute_intensity_downsample_params(self, min_quantile=20, max_base_quantile=90, max_sigma_buffer=6.0):
         """
