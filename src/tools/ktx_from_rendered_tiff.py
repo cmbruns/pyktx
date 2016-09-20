@@ -52,6 +52,14 @@ class RenderedMouseLightOctree(object):
         self.volume_voxels = numpy.array([temp_block.zyx_size[i] for i in [2, 1, 0]], dtype='uint32')
         # Compute total volume size in micrometers
         self.volume_um = self.voxel_um * self.volume_voxels
+        #
+        self.input_dtype = temp_block.input_dtype
+        self.output_dtype = temp_block.input_dtype # Default to same data type for input and output
+        if downsample_intensity and self.input_dtype.itemsize == 2:
+            if self.input_dtype == numpy.uint16:
+                self.output_dtype = numpy.uint8
+            else:
+                raise NotImplementedError("unexpected data type " + str(self.input_dtype))
 
     def iter_blocks(self, max_level=None, folder=None):
         "Walk through rendered blocks, starting at folder folder, up to max_level steps deeper"
@@ -98,7 +106,8 @@ class RenderedTiffBlock(object):
         channel = RTBChannel(self.channel_files[0])
         channel._populate_size_and_histogram()
         self.zyx_size = channel.zyx_size
-        self.dtype = channel.dtype
+        self.input_dtype = channel.input_dtype
+        self.output_type = self.input_dtype
 
     def _populate_size_and_histograms(self):
         """
@@ -112,16 +121,16 @@ class RenderedTiffBlock(object):
             channel._populate_size_and_histogram()
             if self.zyx_size is None:
                 self.zyx_size = channel.zyx_size
-                self.dtype = channel.dtype
+                self.input_dtype = channel.input_dtype
             else:
                 assert self.zyx_size == channel.zyx_size # All channel files must be the same size
-                assert self.dtype == channel.dtype
+                assert self.input_dtype == channel.input_dtype
             self.channels.append(channel)
         # Prepare to create first part of ktx file
         self.ktx_header = KtxHeader()
         self.ktx_header.populate_from_array_params(
                 shape=self.zyx_size, 
-                dtype=self.dtype, 
+                dtype=self.octree_root.output_dtype, 
                 channel_count=len(self.channels))
         self._populate_octree_metadata()
         self.mipmap_shapes = mipmap_shapes(self.zyx_size) # TODO - is this the correct size always?
@@ -235,7 +244,7 @@ class RenderedTiffBlock(object):
             desired_shape = list(self.mipmap_shapes[mipmap_level])
             desired_shape[0] = 1 # Just one slice, please, but still a 3D shape, for the moment
             desired_shape = tuple(desired_shape)
-            arr = numpy.array(parent_channels, dtype=self.dtype, copy=True)
+            arr = numpy.array(parent_channels, dtype=self.octree_root.output_dtype, copy=True)
             scratch = _assort_subvoxels(arr, desired_shape)
             new_slice = _filter_assorted_array(scratch, self.mipmap_filter)
             assert new_slice.shape == desired_shape
@@ -270,19 +279,19 @@ class RenderedTiffBlock(object):
         Simultaneously accumulates deeper mipmap levels in memory, for later streaming.
         """
         # 1) Open all the channel tiff files
-        channel_iterators = []
+        # channel_iterators = []
         tif_streams = []
         for channel in self.channels:
             tif = TIFF.open(channel.file_name, mode='r')
-            channel_iterators.append(tif.iter_images())
+            channel.tif_iterator = tif.iter_images()
             tif_streams.append(tif)
         # 2) Load and process one z-slice at a time
         zslice_shape0 = self.mipmap_shapes[0][1:3] # for sanity checking
         sz = self.zyx_size[0]
         for z_index in range(sz):
             channel_slices = [] # For level zero mipmap
-            for channel in channel_iterators:
-                zslice = next(channel)
+            for channel in self.channels:
+                zslice = next(channel.tif_iterator)
                 # TODO: process slice, if necessary
                 if self.downsample_intensity:
                     pass
@@ -351,7 +360,7 @@ class RTBChannel(object):
         tif.close()
         size = tuple([sz, sy, sx,])
         self.zyx_size = size
-        self.dtype = dtype
+        self.input_dtype = dtype
 
     def _populate_size_and_histogram(self):
         """
@@ -359,7 +368,7 @@ class RTBChannel(object):
         Read through one channel tiff file, storing image size and
         intensity histogram.
         """
-        self.zyx_size, self.histogram, self.dtype = histogram_tiff_file(self.file_name)
+        self.zyx_size, self.histogram, self.input_dtype = histogram_tiff_file(self.file_name)
         # Create histogram of non-zero intensities (because zero means "no data"
         self.percentiles = numpy.zeros((101,), dtype='uint32')
         total_non_zero = 0
@@ -441,12 +450,12 @@ def _exercise_histogram():
 
 def _exercise_octree():
     "for testing octree walking during development"
-    o = RenderedMouseLightOctree(os.path.abspath('./practice_octree_input'), downsample_intensity=True)
+    o = RenderedMouseLightOctree(os.path.abspath('./practice_octree_input'), downsample_intensity=False)
     # Visit top layer of the octree
     for b in o.iter_blocks(max_level=0):
         print (b.channel_files)
         b._populate_size_and_histograms()
-        print (b.zyx_size, b.dtype)
+        print (b.zyx_size, b.input_dtype)
         f = open('./practice_octree_output/test.ktx', 'wb')
         b.write_ktx_file(f)
 
