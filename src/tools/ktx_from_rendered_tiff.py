@@ -11,6 +11,7 @@ import re
 import math
 import datetime
 from collections import deque
+import posixpath
 
 import numpy
 import libtiff
@@ -26,11 +27,11 @@ from ktx.util import mipmap_shapes, _assort_subvoxels, _filter_assorted_array,\
 class RenderedMouseLightOctree(object):
     "Represents a folder containing an octree hierarchy of RenderedTiffBlock volume images"
     
-    def __init__(self, folder, mipmap_filter='arthur', downsample_xy=False, downsample_intensity=False):
-        self.folder = folder
+    def __init__(self, input_folder, mipmap_filter='arthur', downsample_xy=False, downsample_intensity=False):
+        self.input_folder = input_folder
         # Parse the origin and voxel size from file "transform.txt" in the root folder
         self.transform = dict()
-        with io.open(os.path.join(folder, "transform.txt"), 'r') as transform_file:
+        with io.open(os.path.join(input_folder, "transform.txt"), 'r') as transform_file:
             for line in transform_file:
                 fields = line.split(": ")
                 if len(fields) != 2:
@@ -41,12 +42,12 @@ class RenderedMouseLightOctree(object):
         self.origin_um = umFromNm * numpy.array([float(self.transform[key]) for key in ['ox', 'oy', 'oz']], dtype='float64')
         self.voxel_um = umFromNm * numpy.array([float(self.transform[key]) for key in ['sx', 'sy', 'sz']], dtype='float64')
         self.number_of_levels = int(self.transform['nl'])
-        self.specimen_id = os.path.split(folder)[-1]
+        self.specimen_id = os.path.split(input_folder)[-1]
         self.mipmap_filter = mipmap_filter
         self.downsample_xy = downsample_xy
         self.downsample_intensity = downsample_intensity
         # Get base image size, so we can convert voxel size into total volume size
-        temp_block = RenderedTiffBlock(folder, self, [])
+        temp_block = RenderedTiffBlock(input_folder, self, [])
         temp_block._populate_size()
         # Rearrange image size from zyx to xyz
         self.volume_voxels = numpy.array([temp_block.input_zyx_size[i] for i in [2, 1, 0]], dtype='uint32')
@@ -71,13 +72,13 @@ class RenderedMouseLightOctree(object):
     def iter_blocks(self, max_level=None, folder=None):
         "Walk through rendered blocks, starting at folder folder, up to max_level steps deeper"
         if folder is None:
-            folder = self.folder
+            folder = self.input_folder
         level = 0
         if level > max_level:
             return
         if not os.path.isdir(folder):
             return
-        octree_path0 = os.path.relpath(folder, self.folder)
+        octree_path0 = os.path.relpath(folder, self.input_folder)
         octree_path0 = octree_path0.split('/')
         octree_path = []
         for level in octree_path0:
@@ -97,7 +98,6 @@ class RenderedTiffBlock(object):
     
     def __init__(self, folder, octree_root, octree_path):
         "Folder contains one or more 'default.0.tif', 'default.1.tif', etc. channel files"
-        self.folder = folder
         self.octree_root = octree_root
         self.octree_path = octree_path
         self.channel_files = glob.glob(os.path.join(folder, "default.*.tif"))
@@ -473,15 +473,23 @@ def _exercise_histogram():
 
 def _exercise_octree():
     "for testing octree walking during development"
-    o = RenderedMouseLightOctree(os.path.abspath('./practice_octree_input'), 
-            downsample_intensity=False,
+    o = RenderedMouseLightOctree(
+            input_folder=os.path.abspath('./practice_octree_input'), 
+            downsample_intensity=True,
             downsample_xy=True)
     # Visit top layer of the octree
+    output_folder = './practice_octree_output/small_xy_8bit'
     for b in o.iter_blocks(max_level=0):
         print (b.channel_files)
         b._populate_size_and_histograms()
-        print (b.input_zyx_size, b.input_dtype)
-        f = open('./practice_octree_output/test.ktx', 'wb')
+        # print (b.input_zyx_size, b.input_dtype)
+        subfolder = '/'.join(b.octree_path)
+        folder_full = posixpath.join(output_folder, subfolder)
+        if not os.path.exists(folder_full):
+            os.makedirs(folder_full)
+        fname = "default.ktx"
+        fname_full = posixpath.join(folder_full, fname)
+        f = open(fname_full, 'wb')
         b.write_ktx_file(f)
 
 
