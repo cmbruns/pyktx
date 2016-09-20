@@ -12,6 +12,7 @@ import math
 import datetime
 from collections import deque
 import posixpath
+import time
 
 import numpy
 import libtiff
@@ -79,7 +80,8 @@ class RenderedMouseLightOctree(object):
         if not os.path.isdir(folder):
             return
         octree_path0 = os.path.relpath(folder, self.input_folder)
-        octree_path0 = octree_path0.split('/')
+        octree_path0 = os.path.split(octree_path0)
+        # octree_path0 = octree_path0.split(r'/')
         octree_path = []
         for level in octree_path0:
             if re.match(r'[1-8]', level):
@@ -438,7 +440,7 @@ class RTBChannel(object):
         self.downsample_intensity_params = self._compute_intensity_downsample_params()
         # print(self.downsample_intensity_params)
             
-    def _compute_intensity_downsample_params(self, min_quantile=20, max_base_quantile=90, max_sigma_buffer=6.0):
+    def _compute_intensity_downsample_params(self, min_quantile=20, max_base_quantile=95, max_sigma_buffer=6.0):
         """
         Use internal histogram data to estimate optimal sparse neuron intensity downsampling.
         Input parameters:
@@ -463,7 +465,7 @@ class RTBChannel(object):
             variance += d*d
         variance /= float(max_base_quantile - min_quantile + 1)
         stddev = math.sqrt(variance)
-        print("Mean = %.1f, stddev = %.1f" % (mean_intensity, stddev))
+        # print("Mean = %.1f, stddev = %.1f" % (mean_intensity, stddev))
         black_level = self.percentiles[min_quantile]
         white_level = int(self.percentiles[max_base_quantile] + max_sigma_buffer * stddev)
         white_level = min(white_level, self.percentiles[100]) # Don't go above max intensity
@@ -480,7 +482,8 @@ def _exercise_histogram():
 def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_xy = False):
     "for testing octree walking during development"
     o = RenderedMouseLightOctree(
-            input_folder=os.path.abspath('./practice_octree_input'), 
+            # input_folder=os.path.abspath('./practice_octree_input'), 
+            input_folder=os.path.abspath('//fxt/nobackup2/mouselight/2015-06-19-johan-full'), 
             downsample_intensity=downsample_intensity,
             downsample_xy=downsample_xy)
     # Visit top layer of the octree
@@ -494,6 +497,7 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
     else:
         output_folder += '/full'
     for b in o.iter_blocks(max_level=max_level):
+        t0 = time.time()
         print (b.channel_files)
         b._populate_size_and_histograms()
         # print (b.input_zyx_size, b.input_dtype)
@@ -505,12 +509,16 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
         fname_full = posixpath.join(folder_full, fname)
         f = open(fname_full, 'wb')
         b.write_ktx_file(f)
+        f.flush()
+        f.close()
         cmd = "LZ4.exe %s > %s.lz4" % (fname_full, fname_full)
         print (cmd)
         os.system(cmd)
+        t1 = time.time()
+        print ("converting rendered tiff block to ktx.lz4 took %.3f seconds" % (t1 - t0))
 
 
 if __name__ == '__main__':
     libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
-    convert_octree_to_ktx(max_level=1, downsample_intensity=False, downsample_xy=False)
+    convert_octree_to_ktx(max_level=2, downsample_intensity=True, downsample_xy=True)
