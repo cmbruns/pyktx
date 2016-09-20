@@ -150,6 +150,7 @@ class RenderedTiffBlock(object):
         kh['multiscale_level_id'] = len(self.octree_path)
         kh['multiscale_total_levels'] = self.octree_root.number_of_levels
         kh['octree_path'] = "/".join([str(x+1) for x in self.octree_path])
+        kh['number_of_channels'] = len(self.channels)
         assert kh['multiscale_level_id'] < kh['multiscale_total_levels']
         # Walk octree path to compute geometric parameters. Because someone
         # decided that having a separate transform.txt in each folder was
@@ -208,6 +209,23 @@ class RenderedTiffBlock(object):
         kh['ktx_file_creation_program'] = __main__.__file__
         # print (kh['ktx_file_creation_program'])
         kh['pyktx_version'] = ktx.__version__
+        for channel_index in range(len(self.channels)):
+            black_level = 1.0
+            white_level = 65535.0
+            gamma0 = 1.0
+            if self.octree_root.downsample_intensity:
+                black_level = self.channels[channel_index].downsample_intensity_params[0]
+                white_level = self.channels[channel_index].downsample_intensity_params[1]
+                gamma0 = self.channels[channel_index].downsample_intensity_params[2]
+            # Compute parameters needed to reconstruct normalized version of original 16-bit intensities
+            range_ = white_level - black_level
+            scale = range_ / 65534.0
+            offset = (black_level - 1.0) / 65534.0
+            gamma = 1.0/gamma0;
+            # Populate KTX header with intensity reconstruction parameters
+            kh['channel_%d_intensity_gamma' % channel_index] = gamma
+            kh['channel_%d_intensity_scale' % channel_index] = scale
+            kh['channel_%d_intensity_offset' % channel_index] = offset
 
     def _process_mipmap_parent_slice(self, mipmap_level, parent_z_index, channel_slices):
         "Recursive method to incrementally update deeper mipmaps, one slice at a time"
@@ -321,11 +339,6 @@ class RenderedTiffBlock(object):
                     zslice1 *= 255.0 # Restore to range 0-255
                     zslice1 = numpy.ceil(zslice1) # Ensure small finite values are at least 1.0
                     zslice = numpy.array(zslice1, dtype=self.octree_root.output_dtype)
-                    # Populate KTX header with intensity reconstruction parameters
-                    kh = self.ktx_header
-                    kh['channel_%d_intensity_gamma' % channel_index] = 1.0/gamma
-                    kh['channel_%d_intensity_scale' % channel_index] = range_ / 65535.0
-                    kh['channel_%d_intensity_offset' % channel_index] = black_level / 65535.0
                 assert zslice.shape == zslice_shape0
                 channel_slices.append(zslice)
                 channel_index += 1
@@ -521,4 +534,4 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
 if __name__ == '__main__':
     libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
-    convert_octree_to_ktx(max_level=2, downsample_intensity=True, downsample_xy=True)
+    convert_octree_to_ktx(max_level=1, downsample_intensity=False, downsample_xy=True)
