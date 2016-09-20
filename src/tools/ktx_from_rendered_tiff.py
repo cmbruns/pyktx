@@ -147,7 +147,7 @@ class RenderedTiffBlock(object):
         kh["distance_units"] = "micrometers"
         kh['multiscale_level_id'] = len(self.octree_path)
         kh['multiscale_total_levels'] = self.octree_root.number_of_levels
-        kh['octree_path'] = "/".join(self.octree_path)
+        kh['octree_path'] = "/".join([str(x+1) for x in self.octree_path])
         assert kh['multiscale_level_id'] < kh['multiscale_total_levels']
         # Walk octree path to compute geometric parameters. Because someone
         # decided that having a separate transform.txt in each folder was
@@ -159,7 +159,7 @@ class RenderedTiffBlock(object):
         for level in self.octree_path: # range 0-7
             self.volume_um *= 0.5 # Every deeper level is half the size of the lower level
             # Shift origin if this is a right/bottom/far sub-block
-            bigZ = level > 4 # 4,5,6,7
+            bigZ = level >= 4 # 4,5,6,7
             bigX = level % 2 > 0 # 1,3,5,7
             bigY = level in [2,3,6,7] # 2,3,6,7
             if bigZ: # if Z is large, shift Z origin
@@ -294,6 +294,7 @@ class RenderedTiffBlock(object):
         sz = self.input_zyx_size[0]
         for z_index in range(sz):
             channel_slices = [] # For level zero mipmap
+            channel_index = 0
             for channel in self.channels:
                 zslice = next(channel.tif_iterator)
                 # Process slice, if necessary
@@ -318,9 +319,14 @@ class RenderedTiffBlock(object):
                     zslice1 *= 255.0 # Restore to range 0-255
                     zslice1 = numpy.ceil(zslice1) # Ensure small finite values are at least 1.0
                     zslice = numpy.array(zslice1, dtype=self.octree_root.output_dtype)
-                    # TODO: populate KTX header with unmixing parameters
+                    # Populate KTX header with intensity reconstruction parameters
+                    kh = self.ktx_header
+                    kh['channel_%d_intensity_gamma' % channel_index] = 1.0/gamma
+                    kh['channel_%d_intensity_scale' % channel_index] = range_ / 65535.0
+                    kh['channel_%d_intensity_offset' % channel_index] = black_level / 65535.0
                 assert zslice.shape == zslice_shape0
                 channel_slices.append(zslice)
+                channel_index += 1
             image_size_bytes = self._process_tiff_slice(z_index, channel_slices, stream)
         # Pad final bytes of mipmap in output file
         mip_padding_size = 3 - ((image_size_bytes + 3) % 4)
@@ -471,19 +477,27 @@ def _exercise_histogram():
     b._populate_size_and_histograms()
     # print (b.input_zyx_size, b.dtype)
 
-def _exercise_octree():
+def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_xy = False):
     "for testing octree walking during development"
     o = RenderedMouseLightOctree(
             input_folder=os.path.abspath('./practice_octree_input'), 
-            downsample_intensity=True,
-            downsample_xy=True)
+            downsample_intensity=downsample_intensity,
+            downsample_xy=downsample_xy)
     # Visit top layer of the octree
-    output_folder = './practice_octree_output/small_xy_8bit'
-    for b in o.iter_blocks(max_level=0):
+    output_folder = './practice_octree_output'
+    if downsample_intensity and downsample_xy:
+        output_folder += '/small_xy_8bit'
+    elif downsample_intensity:
+        output_folder += '/8bit'
+    elif downsample_xy:
+        output_folder += '/small_xy'
+    else:
+        output_folder += '/full'
+    for b in o.iter_blocks(max_level=max_level):
         print (b.channel_files)
         b._populate_size_and_histograms()
         # print (b.input_zyx_size, b.input_dtype)
-        subfolder = '/'.join(b.octree_path)
+        subfolder = '/'.join([str(x+1) for x in b.octree_path])
         folder_full = posixpath.join(output_folder, subfolder)
         if not os.path.exists(folder_full):
             os.makedirs(folder_full)
@@ -491,9 +505,12 @@ def _exercise_octree():
         fname_full = posixpath.join(folder_full, fname)
         f = open(fname_full, 'wb')
         b.write_ktx_file(f)
+        cmd = "LZ4.exe %s > %s.lz4" % (fname_full, fname_full)
+        print (cmd)
+        os.system(cmd)
 
 
 if __name__ == '__main__':
     libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
-    _exercise_octree()
+    convert_octree_to_ktx(max_level=1, downsample_intensity=False, downsample_xy=False)
