@@ -20,7 +20,7 @@ from small_memory_histogram import histogram_tiff_file
 import ktx
 from ktx import KtxHeader
 from ktx.util import mipmap_shapes, _assort_subvoxels, _filter_assorted_array,\
-    interleave_channel_arrays
+    interleave_channel_arrays, downsample_array_xy, mipmap_dimension
 
 
 class RenderedMouseLightOctree(object):
@@ -49,7 +49,7 @@ class RenderedMouseLightOctree(object):
         temp_block = RenderedTiffBlock(folder, self, [])
         temp_block._populate_size()
         # Rearrange image size from zyx to xyz
-        self.volume_voxels = numpy.array([temp_block.zyx_size[i] for i in [2, 1, 0]], dtype='uint32')
+        self.volume_voxels = numpy.array([temp_block.input_zyx_size[i] for i in [2, 1, 0]], dtype='uint32')
         # Compute total volume size in micrometers
         self.volume_um = self.voxel_um * self.volume_voxels
         #
@@ -60,6 +60,13 @@ class RenderedMouseLightOctree(object):
                 self.output_dtype = numpy.dtype('uint8')
             else:
                 raise NotImplementedError("unexpected data type " + str(self.input_dtype))
+        self.input_zyx_size = temp_block.input_zyx_size
+        self.output_zyx_size = self.input_zyx_size
+        if self.downsample_xy:
+            self.output_zyx_size = tuple(
+                    [self.input_zyx_size[0],
+                    mipmap_dimension(1, self.input_zyx_size[1]),
+                    mipmap_dimension(1, self.input_zyx_size[2]),])
 
     def iter_blocks(self, max_level=None, folder=None):
         "Walk through rendered blocks, starting at folder folder, up to max_level steps deeper"
@@ -94,7 +101,7 @@ class RenderedTiffBlock(object):
         self.octree_root = octree_root
         self.octree_path = octree_path
         self.channel_files = glob.glob(os.path.join(folder, "default.*.tif"))
-        self.zyx_size = None
+        self.input_zyx_size = None
 
     def _populate_size(self):
         """
@@ -102,7 +109,7 @@ class RenderedTiffBlock(object):
         """
         channel = RTBChannel(self.channel_files[0])
         channel._populate_size_and_histogram()
-        self.zyx_size = channel.zyx_size
+        self.input_zyx_size = channel.input_zyx_size
         self.input_dtype = channel.input_dtype
         self.output_type = self.input_dtype
 
@@ -116,21 +123,21 @@ class RenderedTiffBlock(object):
         for fname in self.channel_files:
             channel = RTBChannel(fname)
             channel._populate_size_and_histogram()
-            if self.zyx_size is None:
-                self.zyx_size = channel.zyx_size
+            if self.input_zyx_size is None:
+                self.input_zyx_size = channel.input_zyx_size
                 self.input_dtype = channel.input_dtype
             else:
-                assert self.zyx_size == channel.zyx_size # All channel files must be the same size
+                assert self.input_zyx_size == channel.input_zyx_size # All channel files must be the same size
                 assert self.input_dtype == channel.input_dtype
             self.channels.append(channel)
         # Prepare to create first part of ktx file
         self.ktx_header = KtxHeader()
+        self.mipmap_shapes = mipmap_shapes(self.octree_root.output_zyx_size)
         self.ktx_header.populate_from_array_params(
-                shape=self.zyx_size, 
+                shape=self.octree_root.output_zyx_size, 
                 dtype=self.octree_root.output_dtype, 
                 channel_count=len(self.channels))
         self._populate_octree_metadata()
-        self.mipmap_shapes = mipmap_shapes(self.zyx_size) # TODO - is this the correct size always?
         self._mipmap_parent_slice_cache = [deque() for _ in range(len(self.mipmap_shapes))] # Holds up to three recent slices at each mipmap level
         assert len(self._mipmap_parent_slice_cache) == len(self.mipmap_shapes)
         self._mipmap_slice_cache = [list() for _ in range(len(self.mipmap_shapes))] # Holds all mipmap slices from levels one and higher
@@ -284,13 +291,18 @@ class RenderedTiffBlock(object):
             tif_streams.append(tif)
         # 2) Load and process one z-slice at a time
         zslice_shape0 = self.mipmap_shapes[0][1:3] # for sanity checking
-        sz = self.zyx_size[0]
+        sz = self.input_zyx_size[0]
         for z_index in range(sz):
             channel_slices = [] # For level zero mipmap
             for channel in self.channels:
                 zslice = next(channel.tif_iterator)
                 # Process slice, if necessary
-                # 1) Intensity downsamping
+                # 1) Spatial downsampling in XY
+                if self.octree_root.downsample_xy:
+                    zslice.shape = tuple([1, zslice.shape[0], zslice.shape[1],]) # reshape to include unity z dimension
+                    zslice = downsample_array_xy(zslice, self.octree_root.mipmap_filter)
+                    zslice.shape = zslice.shape[1:] # Back to 2D
+                # 2) Intensity downsamping
                 if self.octree_root.downsample_intensity and self.input_dtype != self.octree_root.output_dtype:
                     black_level = channel.downsample_intensity_params[0]
                     white_level = channel.downsample_intensity_params[1]
@@ -306,7 +318,7 @@ class RenderedTiffBlock(object):
                     zslice1 *= 255.0 # Restore to range 0-255
                     zslice1 = numpy.ceil(zslice1) # Ensure small finite values are at least 1.0
                     zslice = numpy.array(zslice1, dtype=self.octree_root.output_dtype)
-                    # TODO populate KTX header with unmixing parameters
+                    # TODO: populate KTX header with unmixing parameters
                 assert zslice.shape == zslice_shape0
                 channel_slices.append(zslice)
             image_size_bytes = self._process_tiff_slice(z_index, channel_slices, stream)
@@ -334,7 +346,7 @@ class RenderedTiffBlock(object):
             stream.write(mip_padding_size * b'\x00')
     
     def write_ktx_file(self, stream):
-        if self.zyx_size is None:
+        if self.input_zyx_size is None:
             self._populate_size_and_histograms()
         self.ktx_header.number_of_mipmap_levels = len(self.mipmap_shapes)
         self.ktx_header.write_stream(stream)
@@ -370,7 +382,7 @@ class RTBChannel(object):
             sz += 1
         tif.close()
         size = tuple([sz, sy, sx,])
-        self.zyx_size = size
+        self.input_zyx_size = size
         self.input_dtype = dtype
 
     def _populate_size_and_histogram(self):
@@ -379,7 +391,7 @@ class RTBChannel(object):
         Read through one channel tiff file, storing image size and
         intensity histogram.
         """
-        self.zyx_size, self.histogram, self.input_dtype = histogram_tiff_file(self.file_name)
+        self.input_zyx_size, self.histogram, self.input_dtype = histogram_tiff_file(self.file_name)
         # Create histogram of non-zero intensities (because zero means "no data"
         self.percentiles = numpy.zeros((101,), dtype='uint32')
         total_non_zero = 0
@@ -457,16 +469,18 @@ def _exercise_histogram():
     "for testing histogram construction during developement"
     b = RenderedTiffBlock('.')
     b._populate_size_and_histograms()
-    # print (b.zyx_size, b.dtype)
+    # print (b.input_zyx_size, b.dtype)
 
 def _exercise_octree():
     "for testing octree walking during development"
-    o = RenderedMouseLightOctree(os.path.abspath('./practice_octree_input'), downsample_intensity=True)
+    o = RenderedMouseLightOctree(os.path.abspath('./practice_octree_input'), 
+            downsample_intensity=False,
+            downsample_xy=True)
     # Visit top layer of the octree
     for b in o.iter_blocks(max_level=0):
         print (b.channel_files)
         b._populate_size_and_histograms()
-        print (b.zyx_size, b.input_dtype)
+        print (b.input_zyx_size, b.input_dtype)
         f = open('./practice_octree_output/test.ktx', 'wb')
         b.write_ktx_file(f)
 
