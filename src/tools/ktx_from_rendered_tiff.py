@@ -57,7 +57,7 @@ class RenderedMouseLightOctree(object):
         self.output_dtype = temp_block.input_dtype # Default to same data type for input and output
         if downsample_intensity and self.input_dtype.itemsize == 2:
             if self.input_dtype == numpy.uint16:
-                self.output_dtype = numpy.uint8
+                self.output_dtype = numpy.dtype('uint8')
             else:
                 raise NotImplementedError("unexpected data type " + str(self.input_dtype))
 
@@ -292,10 +292,23 @@ class RenderedTiffBlock(object):
             channel_slices = [] # For level zero mipmap
             for channel in self.channels:
                 zslice = next(channel.tif_iterator)
-                # TODO: process slice, if necessary
-                if self.downsample_intensity:
-                    pass
-                    # TODO:
+                # Process slice, if necessary
+                if self.downsample_intensity and self.input_dtype != self.octree_root.output_dtype:
+                    black_level = channel.downsample_intensity_params[0]
+                    white_level = channel.downsample_intensity_params[1]
+                    gamma = channel.downsample_intensity_params[2]
+                    zslice1 = numpy.array(zslice, dtype='float64', copy=True)
+                    zslice1 -= black_level # Set lower bound to zero 
+                    zslice1[zslice1 <= 1] = 1 # Truncate small values to 1
+                    zslice1[zslice == 0] = 0 # Reset all "no data" voxels back to zero
+                    range_ = float(white_level - black_level)
+                    zslice1 *= 1.0 / range_ # Scale to range 0 - 1
+                    zslice1[zslice1 >= 1.0] = 1.0 # Truncate large values to 1.0
+                    zslice1 = zslice1 ** gamma # Gamma correct to emphasize dim intensities
+                    zslice1 *= 255.0 # Restore to range 0-255
+                    zslice1 = numpy.ceil(zslice1) # Ensure small finite values are at least 1.0
+                    zslice = numpy.array(zslice1, dtype=self.octree_root.output_dtype)
+                    # TODO populate KTX header with unmixing parameters
                 assert zslice.shape == zslice_shape0
                 channel_slices.append(zslice)
             image_size_bytes = self._process_tiff_slice(z_index, channel_slices, stream)
@@ -409,7 +422,7 @@ class RTBChannel(object):
         self.downsample_intensity_params = self._compute_intensity_downsample_params()
         print(self.downsample_intensity_params)
             
-    def _compute_intensity_downsample_params(self, min_quantile=20, max_base_quantile=90, max_sigma_buffer=4.5):
+    def _compute_intensity_downsample_params(self, min_quantile=20, max_base_quantile=90, max_sigma_buffer=6.0):
         """
         Use internal histogram data to estimate optimal sparse neuron intensity downsampling.
         Input parameters:
@@ -450,7 +463,7 @@ def _exercise_histogram():
 
 def _exercise_octree():
     "for testing octree walking during development"
-    o = RenderedMouseLightOctree(os.path.abspath('./practice_octree_input'), downsample_intensity=False)
+    o = RenderedMouseLightOctree(os.path.abspath('./practice_octree_input'), downsample_intensity=True)
     # Visit top layer of the octree
     for b in o.iter_blocks(max_level=0):
         print (b.channel_files)

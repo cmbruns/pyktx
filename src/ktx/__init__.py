@@ -158,7 +158,9 @@ class KtxHeader(object):
         return str(item).encode() in self.key_value_metadata
     
     def populate_from_array_params(self, shape, dtype, channel_count):
-        if dtype.byteorder == '<':
+        if dtype.itemsize == 1:
+            self.little_endian = sys.byteorder == 'little'          
+        elif dtype.byteorder == '<':
             self.little_endian = True
         elif dtype.byteorder == '=':
             self.little_endian = sys.byteorder == 'little'
