@@ -41,7 +41,7 @@ import ktx
 from ktx.util import create_mipmaps, mipmap_dimension, interleave_channel_arrays, downsample_array_xy
 
 """
-TODO: For converting rendered octree blocks, include the following precomputed:
+For converting rendered octree blocks, include the following precomputed:
   * all mipmap levels DONE
   * optional intensity downsampling, with affine reestimation parameters DONE
   * optional spatial downsampling (XY DONE)

@@ -160,7 +160,7 @@ class RenderedTiffBlock(object):
         self.origin_um = numpy.array(self.octree_root.origin_um, copy=True)
         self.volume_um = numpy.array(self.octree_root.volume_um, copy=True)
         for level in self.octree_path: # range 0-7
-            self.volume_um *= 0.5 # Every deeper level is half the size of the lower level
+            self.volume_um *= 0.5 # Every deeper level is half the size of the previous level
             # Shift origin if this is a right/bottom/far sub-block
             bigZ = level >= 4 # 4,5,6,7
             bigX = level % 2 > 0 # 1,3,5,7
@@ -180,6 +180,19 @@ class RenderedTiffBlock(object):
                 [0, 0, sz, oz],
                 [0, 0, 0, 1],], dtype='float64')
         kh["xyz_from_texcoord_xform"] = xform
+        # Store block corner positions, for use in more general block rendering
+        corner_xyzs = []
+        corner_texcoords = []
+        for cz in range(2):
+            for cy in range(2):
+                for cx in range(2):
+                    corner_xyzs.append( tuple([ox + cx*sx, oy + cy*sy, oz + cz*sz ]) )
+                    corner_texcoords.append( tuple([float(cx), float(cy), float(cz)]) )
+        xyz_str = ", ".join([str(v) for v in corner_xyzs])
+        texcoord_str = ", ".join([str(v) for v in corner_texcoords])
+        kh["corner_xyzs"] = "[%s]" % xyz_str # 8 corners per sub-block
+        kh["corner_texcoords"] = "[%s]" % texcoord_str # texture coordinate for each corner
+        #
         center = numpy.array( (ox + 0.5*sx, oy + 0.5*sy, oz + 0.5*sz,), )
         radius = math.sqrt(sx*sx + sy*sy + sz*sz)/16.0
         kh['bounding_sphere_center'] = center
@@ -202,7 +215,15 @@ class RenderedTiffBlock(object):
         if len(relations) == 0:
             relations.append("unchanged")
         kh['relation_to_parent'] = ";".join(relations)
-        # TODO: Per channel statistics
+        # Per channel statistics
+        for c in range(len(self.channels)):
+            channel = self.channels[c]
+            quantiles = [channel.percentiles[10*p] for p in range(11)]
+            kh['channel_%d_intensity_quantiles' % c] = quantiles
+            zero_count = channel.histogram[0]
+            total_count = sum(channel.histogram)
+            percent_zero_intensity = 100.0 * zero_count / float(total_count)
+            kh['channel_%d_percent_zero_intensity' % c] = percent_zero_intensity
         kh['ktx_file_creation_date'] = datetime.datetime.now()
         # print (kh['ktx_file_creation_date'])
         import __main__ #@UnresolvedImport
@@ -527,6 +548,7 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
         cmd = "LZ4.exe %s > %s.lz4" % (fname_full, fname_full)
         print (cmd)
         os.system(cmd)
+        os.remove(fname_full) # Delete uncompressed version
         t1 = time.time()
         print ("converting rendered tiff block to ktx.lz4 took %.3f seconds" % (t1 - t0))
 
@@ -534,4 +556,4 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
 if __name__ == '__main__':
     libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
-    convert_octree_to_ktx(max_level=1, downsample_intensity=False, downsample_xy=True)
+    convert_octree_to_ktx(max_level=2, downsample_intensity=True, downsample_xy=True)
