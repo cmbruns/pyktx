@@ -80,8 +80,7 @@ class RenderedMouseLightOctree(object):
         if not os.path.isdir(folder):
             return
         octree_path0 = os.path.relpath(folder, self.input_folder)
-        octree_path0 = os.path.split(octree_path0)
-        # octree_path0 = octree_path0.split(r'/')
+        octree_path0 = octree_path0.split(os.path.sep)
         octree_path = []
         for level in octree_path0:
             if re.match(r'[1-8]', level):
@@ -354,10 +353,11 @@ class RenderedTiffBlock(object):
                     zslice1[zslice1 <= 1] = 1 # Truncate small values to 1
                     zslice1[zslice == 0] = 0 # Reset all "no data" voxels back to zero
                     range_ = float(white_level - black_level)
+                    range_ = max(1, range_) # Avoid divide by zero below
                     zslice1 *= 1.0 / range_ # Scale to range 0 - 1
                     zslice1[zslice1 >= 1.0] = 1.0 # Truncate large values to 1.0
                     zslice1 = zslice1 ** gamma # Gamma correct to emphasize dim intensities
-                    zslice1 *= 255.0 # Restore to range 0-255
+                    zslice1 *= 254.0 # Restore to range 0-254 within black-white range
                     zslice1 = numpy.ceil(zslice1) # Ensure small finite values are at least 1.0
                     zslice = numpy.array(zslice1, dtype=self.octree_root.output_dtype)
                 assert zslice.shape == zslice_shape0
@@ -452,18 +452,19 @@ class RTBChannel(object):
         accumulated = 0
         percentage = 0.0
         # print(0, min_non_zero)
-        for i in range(1, 65536):
-            floor_percentage = percentage
-            accumulated += self.histogram[i]
-            ceil_percentage = 100.0 * accumulated / float(total_non_zero);
-            percentage = ceil_percentage
-            min_bin = int(floor_percentage)
-            max_bin = int(ceil_percentage)
-            if min_bin == max_bin:
-                continue
-            for p in range(min_bin+1, max_bin+1):
-                self.percentiles[p] = i
-                # print(p, i)
+        if total_non_zero > 0:
+            for i in range(1, 65536):
+                floor_percentage = percentage
+                accumulated += self.histogram[i]
+                ceil_percentage = 100.0 * accumulated / float(total_non_zero);
+                percentage = ceil_percentage
+                min_bin = int(floor_percentage)
+                max_bin = int(ceil_percentage)
+                if min_bin == max_bin:
+                    continue
+                for p in range(min_bin+1, max_bin+1):
+                    self.percentiles[p] = i
+                    # print(p, i)
         # print(100, max_non_zero)
         self.percentiles[0] = min_non_zero
         self.percentiles[100] = max_non_zero
@@ -508,7 +509,7 @@ class RTBChannel(object):
         
 
 def _exercise_histogram():
-    "for testing histogram construction during developement"
+    "for testing histogram construction during development"
     b = RenderedTiffBlock('.')
     b._populate_size_and_histograms()
     # print (b.input_zyx_size, b.dtype)
@@ -521,7 +522,7 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
             downsample_intensity=downsample_intensity,
             downsample_xy=downsample_xy)
     # Visit top layer of the octree
-    output_folder = './practice_octree_output'
+    output_folder = 'E:/brunsc/test_render/2015-06-19-johan-full'
     if downsample_intensity and downsample_xy:
         output_folder += '/small_xy_8bit'
     elif downsample_intensity:
@@ -556,4 +557,4 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
 if __name__ == '__main__':
     libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
-    convert_octree_to_ktx(max_level=2, downsample_intensity=True, downsample_xy=True)
+    convert_octree_to_ktx(max_level=8, downsample_intensity=True, downsample_xy=True)
