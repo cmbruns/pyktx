@@ -84,7 +84,7 @@ class RenderedMouseLightOctree(object):
         octree_path = []
         for level in octree_path0:
             if re.match(r'[1-8]', level):
-                octree_path.append(int(level) - 1)
+                octree_path.append(int(level))
         yield RenderedTiffBlock(folder, self, octree_path)
         if level == max_level:
             return
@@ -148,7 +148,7 @@ class RenderedTiffBlock(object):
         kh["distance_units"] = "micrometers"
         kh['multiscale_level_id'] = len(self.octree_path)
         kh['multiscale_total_levels'] = self.octree_root.number_of_levels
-        kh['octree_path'] = "/".join([str(x+1) for x in self.octree_path])
+        kh['octree_path'] = "/".join([str(x) for x in self.octree_path])
         kh['number_of_channels'] = len(self.channels)
         assert kh['multiscale_level_id'] < kh['multiscale_total_levels']
         # Walk octree path to compute geometric parameters. Because someone
@@ -158,7 +158,8 @@ class RenderedTiffBlock(object):
         # Initialize with top-level origin and size
         self.origin_um = numpy.array(self.octree_root.origin_um, copy=True)
         self.volume_um = numpy.array(self.octree_root.volume_um, copy=True)
-        for level in self.octree_path: # range 0-7
+        for level0 in self.octree_path: # range 1-8
+            level = level0 - 1 # zero-based, range 0-7
             self.volume_um *= 0.5 # Every deeper level is half the size of the previous level
             # Shift origin if this is a right/bottom/far sub-block
             bigZ = level >= 4 # 4,5,6,7
@@ -501,9 +502,15 @@ class RTBChannel(object):
         variance /= float(max_base_quantile - min_quantile + 1)
         stddev = math.sqrt(variance)
         # print("Mean = %.1f, stddev = %.1f" % (mean_intensity, stddev))
-        black_level = self.percentiles[min_quantile]
         white_level = int(self.percentiles[max_base_quantile] + max_sigma_buffer * stddev)
         white_level = min(white_level, self.percentiles[100]) # Don't go above max intensity
+        white_level = max(white_level, 254)
+        # 
+        black_level = self.percentiles[min_quantile]
+        # Always leave at least 8 bits between maximum and minimum,
+        # leaving room for no-data-zero
+        black_level = min(black_level, white_level - 253)
+        black_level = max(black_level, 1)
         gamma = 0.5
         return black_level, white_level, gamma
         
@@ -514,7 +521,7 @@ def _exercise_histogram():
     b._populate_size_and_histograms()
     # print (b.input_zyx_size, b.dtype)
 
-def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_xy = False):
+def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_xy = False, overwrite=False):
     "for testing octree walking during development"
     o = RenderedMouseLightOctree(
             # input_folder=os.path.abspath('./practice_octree_input'), 
@@ -534,27 +541,59 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
     for b in o.iter_blocks(max_level=max_level):
         t0 = time.time()
         print (b.channel_files)
-        b._populate_size_and_histograms()
-        # print (b.input_zyx_size, b.input_dtype)
-        subfolder = '/'.join([str(x+1) for x in b.octree_path])
+        subfolder = '/'.join([str(x) for x in b.octree_path])
         folder_full = posixpath.join(output_folder, subfolder)
-        if not os.path.exists(folder_full):
-            os.makedirs(folder_full)
         fname = "default.ktx"
         fname_full = posixpath.join(folder_full, fname)
+        final_output_fname = "%s.lz4" % fname_full
+        # Skip output KTX blocks that we have previously created
+        if os.path.isfile(final_output_fname) and not overwrite:
+            continue
+        #
+        b._populate_size_and_histograms()
+        # print (b.input_zyx_size, b.input_dtype)
+        if not os.path.exists(folder_full):
+            os.makedirs(folder_full)
         f = open(fname_full, 'wb')
         b.write_ktx_file(f)
         f.flush()
         f.close()
-        cmd = "LZ4.exe %s > %s.lz4" % (fname_full, fname_full)
+        cmd = "LZ4.exe %s > %s" % (fname_full, final_output_fname)
         print (cmd)
         os.system(cmd)
         os.remove(fname_full) # Delete uncompressed version
         t1 = time.time()
         print ("converting rendered tiff block to ktx.lz4 took %.3f seconds" % (t1 - t0))
 
+def convert_one_octree_block(root_folder, octree_path=[], downsample_intensity=True, downsample_xy=True, file_name="converted.ktx"):
+    o = RenderedMouseLightOctree(
+            # input_folder=os.path.abspath('./practice_octree_input'), 
+            input_folder=os.path.abspath('//fxt/nobackup2/mouselight/2015-06-19-johan-full'), 
+            downsample_intensity=downsample_intensity,
+            downsample_xy=downsample_xy)
+    subfolder = os.path.sep.join([str(n) for n in octree_path])
+    folder = os.path.join(root_folder, subfolder)
+    b = RenderedTiffBlock(folder, o, octree_path)
+    f = open(file_name, 'wb')
+    b.write_ktx_file(f)
+    f.flush()
+    f.close()
+    cmd = "LZ4.exe %s > %s.lz4" % (file_name, file_name)
+    print (cmd)
+    os.system(cmd)
+    os.remove(file_name) # Delete uncompressed version
+    
 
 if __name__ == '__main__':
     libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
-    convert_octree_to_ktx(max_level=8, downsample_intensity=True, downsample_xy=True)
+    if True:
+        convert_octree_to_ktx(max_level=8, downsample_intensity=True, downsample_xy=True)
+    if False:
+        # octree_path = [1,2,3,8,6,5,]
+        octree_path = [1,2,3,2,4,7,]
+        convert_one_octree_block(
+                octree_path=octree_path, 
+                root_folder='//fxt/nobackup2/mouselight/2015-06-19-johan-full',
+                file_name='block8xy_'+''.join([str(n) for n in octree_path])+".ktx",
+                downsample_intensity=True, downsample_xy=True ) 
