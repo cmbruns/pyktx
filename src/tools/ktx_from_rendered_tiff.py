@@ -101,7 +101,7 @@ class RenderedTiffBlock(object):
         "Folder contains one or more 'default.0.tif', 'default.1.tif', etc. channel files"
         self.octree_root = octree_root
         self.octree_path = octree_path
-        self.channel_files = glob.glob(os.path.join(folder, "default.*.tif"))
+        self.channel_files = sorted(glob.glob(os.path.join(folder, "default.*.tif")))
         self.input_zyx_size = None
 
     def _populate_size(self):
@@ -568,7 +568,7 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
 def convert_one_octree_block(root_folder, octree_path=[], downsample_intensity=True, downsample_xy=True, file_name="converted.ktx"):
     o = RenderedMouseLightOctree(
             # input_folder=os.path.abspath('./practice_octree_input'), 
-            input_folder=os.path.abspath('//fxt/nobackup2/mouselight/2015-06-19-johan-full'), 
+            input_folder=os.path.abspath(root_folder), 
             downsample_intensity=downsample_intensity,
             downsample_xy=downsample_xy)
     subfolder = os.path.sep.join([str(n) for n in octree_path])
@@ -587,13 +587,14 @@ def convert_one_octree_block(root_folder, octree_path=[], downsample_intensity=T
 if __name__ == '__main__':
     libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
-    if True:
+    big_render = False
+    if big_render:
         convert_octree_to_ktx(max_level=8, downsample_intensity=True, downsample_xy=True)
-    if False:
+    else:
         # octree_path = [1,2,3,8,6,5,]
-        octree_path = [1,2,3,2,4,7,]
+        octree_path = [6,2,7,3,1,8,]
         convert_one_octree_block(
                 octree_path=octree_path, 
-                root_folder='//fxt/nobackup2/mouselight/2015-06-19-johan-full',
-                file_name='block8xy_'+''.join([str(n) for n in octree_path])+".ktx",
-                downsample_intensity=True, downsample_xy=True ) 
+                root_folder='//fxt/nobackup2/mouselight/2016-04-04b',
+                file_name='blockfull_'+''.join([str(n) for n in octree_path])+".ktx",
+                downsample_intensity=False, downsample_xy=False ) 
