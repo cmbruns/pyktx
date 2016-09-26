@@ -476,7 +476,7 @@ class RTBChannel(object):
         self.downsample_intensity_params = self._compute_intensity_downsample_params()
         # print(self.downsample_intensity_params)
             
-    def _compute_intensity_downsample_params(self, min_quantile=20, max_base_quantile=95, max_sigma_buffer=6.0):
+    def _compute_intensity_downsample_params(self, min_quantile=20, max_base_quantile=95, max_sigma_buffer=30.0):
         """
         Use internal histogram data to estimate optimal sparse neuron intensity downsampling.
         Input parameters:
@@ -592,9 +592,10 @@ if __name__ == '__main__':
         convert_octree_to_ktx(max_level=8, downsample_intensity=True, downsample_xy=True)
     else:
         # octree_path = [1,2,3,8,6,5,]
-        octree_path = [6,2,7,3,1,8,]
+        # octree_path = [6,2,7,3,1,8,]
+        octree_path = []
         convert_one_octree_block(
                 octree_path=octree_path, 
                 root_folder='//fxt/nobackup2/mouselight/2016-04-04b',
-                file_name='blockfull_'+''.join([str(n) for n in octree_path])+".ktx",
-                downsample_intensity=False, downsample_xy=False ) 
+                file_name='block20160404b8xy_'+''.join([str(n) for n in octree_path])+".ktx",
+                downsample_intensity=True, downsample_xy=True ) 
