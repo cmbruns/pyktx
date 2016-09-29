@@ -18,7 +18,7 @@ import numpy
 import libtiff
 from libtiff import TIFF
 
-from small_memory_histogram import histogram_tiff_file
+from ktx.octree.small_memory_histogram import histogram_tiff_file
 import ktx
 from ktx import KtxHeader
 from ktx.util import mipmap_shapes, _assort_subvoxels, _filter_assorted_array,\
@@ -523,13 +523,15 @@ def _exercise_histogram():
 
 def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_xy = False, overwrite=False):
     "for testing octree walking during development"
+    # specimen_name = '2015-06-19-johan-full'
+    specimen_name = '2016-04-04b'
     o = RenderedMouseLightOctree(
             # input_folder=os.path.abspath('./practice_octree_input'), 
-            input_folder=os.path.abspath('//fxt/nobackup2/mouselight/2015-06-19-johan-full'), 
+            input_folder=os.path.abspath('//fxt/nobackup2/mouselight/%s' % specimen_name), 
             downsample_intensity=downsample_intensity,
             downsample_xy=downsample_xy)
     # Visit top layer of the octree
-    output_folder = 'E:/brunsc/test_render/2015-06-19-johan-full'
+    output_folder = 'E:/brunsc/test_render/%s' % specimen_name
     if downsample_intensity and downsample_xy:
         output_folder += '/small_xy_8bit'
     elif downsample_intensity:
@@ -587,7 +589,7 @@ def convert_one_octree_block(root_folder, octree_path=[], downsample_intensity=T
 if __name__ == '__main__':
     libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
-    big_render = False
+    big_render = True
     if big_render:
         convert_octree_to_ktx(max_level=8, downsample_intensity=True, downsample_xy=True)
     else:
