@@ -24,6 +24,8 @@ from ktx import KtxHeader
 from ktx.util import mipmap_shapes, _assort_subvoxels, _filter_assorted_array,\
     interleave_channel_arrays, downsample_array_xy, mipmap_dimension
 
+libtiff.libtiff_ctypes.suppress_warnings()
+
 
 class RenderedMouseLightOctree(object):
     "Represents a folder containing an octree hierarchy of RenderedTiffBlock volume images"
@@ -476,7 +478,12 @@ class RTBChannel(object):
         self.downsample_intensity_params = self._compute_intensity_downsample_params()
         # print(self.downsample_intensity_params)
             
-    def _compute_intensity_downsample_params(self, min_quantile=20, max_base_quantile=95, max_sigma_buffer=30.0):
+    def _compute_intensity_downsample_params(
+            self, 
+            min_quantile=20, 
+            max_base_quantile=95, 
+            max_sigma_buffer=6.0,
+            max_proportion=0.75):
         """
         Use internal histogram data to estimate optimal sparse neuron intensity downsampling.
         Input parameters:
@@ -502,15 +509,23 @@ class RTBChannel(object):
         variance /= float(max_base_quantile - min_quantile + 1)
         stddev = math.sqrt(variance)
         # print("Mean = %.1f, stddev = %.1f" % (mean_intensity, stddev))
+        # Clip at 6 standard deviations above the 95th percentile
         white_level = int(self.percentiles[max_base_quantile] + max_sigma_buffer * stddev)
+        # Clip at no less than half the true maximum
+        white_level = int(max(white_level, max_proportion * self.percentiles[100]))
+        # Clip at no more than the true maximum
         white_level = min(white_level, self.percentiles[100]) # Don't go above max intensity
+        # Clip at no less than 254 intensity
         white_level = max(white_level, 254)
         # 
         black_level = self.percentiles[min_quantile]
         # Always leave at least 8 bits between maximum and minimum,
         # leaving room for no-data-zero
+        # Keep interval between black and white to at least 253
         black_level = min(black_level, white_level - 253)
+        # Keep black level at least 1 (zero means "no data")
         black_level = max(black_level, 1)
+        # Always use square root
         gamma = 0.5
         return black_level, white_level, gamma
         
@@ -567,37 +582,7 @@ def convert_octree_to_ktx(max_level=1, downsample_intensity = False, downsample_
         t1 = time.time()
         print ("converting rendered tiff block to ktx.lz4 took %.3f seconds" % (t1 - t0))
 
-def convert_one_octree_block(root_folder, octree_path=[], downsample_intensity=True, downsample_xy=True, file_name="converted.ktx"):
-    o = RenderedMouseLightOctree(
-            # input_folder=os.path.abspath('./practice_octree_input'), 
-            input_folder=os.path.abspath(root_folder), 
-            downsample_intensity=downsample_intensity,
-            downsample_xy=downsample_xy)
-    subfolder = os.path.sep.join([str(n) for n in octree_path])
-    folder = os.path.join(root_folder, subfolder)
-    b = RenderedTiffBlock(folder, o, octree_path)
-    f = open(file_name, 'wb')
-    b.write_ktx_file(f)
-    f.flush()
-    f.close()
-    cmd = "LZ4.exe %s > %s.lz4" % (file_name, file_name)
-    print (cmd)
-    os.system(cmd)
-    os.remove(file_name) # Delete uncompressed version
-    
 
 if __name__ == '__main__':
-    libtiff.libtiff_ctypes.suppress_warnings()
     # exercise_histogram()
-    big_render = True
-    if big_render:
-        convert_octree_to_ktx(max_level=8, downsample_intensity=True, downsample_xy=True)
-    else:
-        # octree_path = [1,2,3,8,6,5,]
-        # octree_path = [6,2,7,3,1,8,]
-        octree_path = []
-        convert_one_octree_block(
-                octree_path=octree_path, 
-                root_folder='//fxt/nobackup2/mouselight/2016-04-04b',
-                file_name='block20160404b8xy_'+''.join([str(n) for n in octree_path])+".ktx",
-                downsample_intensity=True, downsample_xy=True ) 
+    convert_octree_to_ktx(max_level=8, downsample_intensity=True, downsample_xy=True)

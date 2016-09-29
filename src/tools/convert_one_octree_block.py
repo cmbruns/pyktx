@@ -6,8 +6,6 @@ Created on Sep 29, 2016
 
 import os
 
-import libtiff
-
 from ktx.octree.ktx_from_rendered_tiff import RenderedMouseLightOctree, RenderedTiffBlock
 
 def convert_one_octree_block(
@@ -28,15 +26,18 @@ def convert_one_octree_block(
     b.write_ktx_file(f)
     f.flush()
     f.close()
-    cmd = "LZ4.exe %s > %s.lz4" % (file_name, file_name)
-    print (cmd)
-    os.system(cmd)
-    os.remove(file_name) # Delete uncompressed version
+    do_lz4_compress = False
+    if do_lz4_compress:
+        cmd = "LZ4.exe %s > %s.lz4" % (file_name, file_name)
+        print (cmd)
+        os.system(cmd)
+        os.remove(file_name) # Delete uncompressed version
     
 if __name__ == "__main__":
-    libtiff.libtiff_ctypes.suppress_warnings()
     print( "converting file to ktx" )
-    octree_path = [5,4,8,3,2,4]
+    # octree_path = [5,4,8,3,2,4]
+    # octree_path = [6,2,7,3,1,8]
+    octree_path = [1,]
     for downsample_intensity in (True,False):
         for downsample_xy in (True,False):
             file_name = 'block20160404b_'
