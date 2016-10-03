@@ -7,3 +7,4 @@
 /src/tools/*.lz4
 /src/tools/practice_octree_input
 /src/tools/practice_octree_output
+/src/tools/cluster/jobscripts
