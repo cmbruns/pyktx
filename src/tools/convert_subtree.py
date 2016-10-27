@@ -42,8 +42,10 @@ def convert_subtree(
         full_file = output_dir + file_name
         print (full_file)
         if os.path.exists(full_file) and not overwrite:
-            print("Skipping existing file")
-            continue
+            file_size = os.stat(full_file).st_size
+            if file_size > 0:
+                print("Skipping existing file")
+                continue
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         f = open(full_file, 'wb')
