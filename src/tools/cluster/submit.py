@@ -9,7 +9,7 @@ first_job = 0
 first_job = 0
 jobcount = 0
 skipped_jobs = 0
-os.chdir('jobscripts_2016-07-18b')
+os.chdir('jobscripts_161031c')
 for job in glob.glob("subtree*.sh"):
     if first_job > skipped_jobs:
         skipped_jobs += 1

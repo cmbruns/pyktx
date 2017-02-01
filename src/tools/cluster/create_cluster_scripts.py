@@ -11,8 +11,11 @@ echo $PYTHONPATH
 """
 
 # input_root = "/nobackup2/mouselight/2016-04-04b"
-input_root = "/nobackup2/mouselight/2016-07-18b"
-output_root = "/nobackup2/mouselight/brunsc/ktxtest"
+# input_root = "/nobackup2/mouselight/2016-07-18b"
+# input_root = "/nrs/mltest/161025b"
+input_root = "/nrs/mouselight/161031c"
+# output_root = "/nobackup2/mouselight/brunsc/ktxtest"
+output_root = "/nrs/mouselight/brunsc/ktxtest"
 subtree_depth = 3
 
 def recurse_octree(folder, level, specimen_name):
