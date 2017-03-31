@@ -3,13 +3,12 @@
 import os
 import glob
 
-maxjobs = 3000
-first_job = 0
+maxjobs = 4200
 # maxjobs = 3000
 first_job = 0
 jobcount = 0
 skipped_jobs = 0
-os.chdir('jobscripts_161031c')
+os.chdir('jobscripts_20170217_10ExM')
 for job in glob.glob("subtree*.sh"):
     if first_job > skipped_jobs:
         skipped_jobs += 1

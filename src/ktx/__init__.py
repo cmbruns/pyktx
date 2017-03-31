@@ -193,7 +193,14 @@ class KtxHeader(object):
             raise # TODO
         #
         # TODO: - lots of cases need to be enumerate here...
-        if self.gl_base_internal_format == GL.GL_RG:
+        if self.gl_base_internal_format == GL.GL_RED:
+            if self.gl_type == GL.GL_UNSIGNED_SHORT:
+                self.gl_internal_format = GL.GL_R16
+            elif self.gl_type == GL.GL_UNSIGNED_BYTE:
+                self.gl_internal_format = GL.GL_R8
+            else:
+                raise
+        elif self.gl_base_internal_format == GL.GL_RG:
             if self.gl_type == GL.GL_UNSIGNED_SHORT:
                 self.gl_internal_format = GL.GL_RG16
             elif self.gl_type == GL.GL_UNSIGNED_BYTE:
