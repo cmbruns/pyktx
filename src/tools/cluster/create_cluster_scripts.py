@@ -7,17 +7,17 @@ script_base = """\
 export KTXSRC='/home/brunsc/git/pyktx/src'
 export PYTHONPATH="$KTXSRC"
 echo $PYTHONPATH
-/misc/local/python3/bin/python3.5 $KTXSRC/tools/convert_subtree_full.py "%s" "%s" "%s" %d
+/misc/local/python3/bin/python3.5 $KTXSRC/tools/convert_subtree.py "%s" "%s" "%s" %d
 """
 
 # input_root = "/nobackup2/mouselight/2016-04-04b"
 # input_root = "/nobackup2/mouselight/2016-07-18b"
 # input_root = "/nrs/mltest/161025b"
-# input_root = "/nrs/mouselight/2015-06-19-johan-full"
-input_root = "/groups/dickson/dicksonlab/BenArthur/20170217_10ExM"
+input_root = "/nrs/mouselight/Users/base/150619_prob_octant12"
+# input_root = "/groups/dickson/dicksonlab/BenArthur/20170217_10ExM"
 # output_root = "/nobackup2/mouselight/brunsc/ktxtest"
-# output_root = "/nrs/mouselight/brunsc/ktxtest"
-output_root = "/groups/dickson/dicksonlab/CMBruns/ktx"
+output_root = "/nrs/mouselight/brunsc/ktxtest"
+# output_root = "/groups/dickson/dicksonlab/CMBruns/ktx"
 subtree_depth = 3
 
 def recurse_octree(folder, level, specimen_name):

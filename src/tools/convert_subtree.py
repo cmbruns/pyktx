@@ -49,9 +49,15 @@ def convert_subtree(
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         f = open(full_file, 'wb')
-        block.write_ktx_file(f)
-        f.flush()
-        f.close()
+        try:
+            block.write_ktx_file(f)
+            f.flush()
+            f.close()
+        except:
+            print("Error writing file %s" % full_file)
+            f.close()
+            os.unlink(f.name)
+            
 
 def convert_subtree_simple(input_path, output_path, subtree_path, subtree_level_count):
     t0 = time.time()
