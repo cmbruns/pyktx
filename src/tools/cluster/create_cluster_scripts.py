@@ -7,7 +7,7 @@ script_base = """\
 export KTXSRC='/home/brunsc/git/pyktx/src'
 export PYTHONPATH="$KTXSRC"
 echo $PYTHONPATH
-/misc/local/python3/bin/python3.5 $KTXSRC/tools/convert_subtree.py "%s" "%s" "%s" %d
+/misc/local/python3/bin/python3.5 $KTXSRC/tools/convert_subtree_full.py "%s" "%s" "%s" %d
 """
 
 # input_root = "/nobackup2/mouselight/2016-04-04b"
