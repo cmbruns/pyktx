@@ -55,6 +55,7 @@ def convert_subtree(
             f.close()
         except:
             print("Error writing file %s" % full_file)
+            f.flush()
             f.close()
             os.unlink(f.name)
             
